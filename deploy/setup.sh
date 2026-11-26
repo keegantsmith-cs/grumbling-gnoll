@@ -14,6 +14,12 @@ if [ -z "$DOMAIN" ]; then
 fi
 echo "==> Setting up The Grumbling Gnoll at https://$DOMAIN"
 
+if ! swapon --show | grep -q .; then
+  echo "==> Adding 2 GB of swap so small servers don't run out of memory while building"
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> Installing system packages"
 apt-get update -y
 apt-get install -y curl git build-essential debian-keyring debian-archive-keyring apt-transport-https ufw
