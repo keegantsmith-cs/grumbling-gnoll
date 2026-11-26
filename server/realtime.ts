@@ -341,7 +341,17 @@ export function initRealtime(server: HttpServer) {
       const c = one("SELECT initiative FROM campaigns WHERE id = ?", d.campaignId)!;
       const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
       const sortEntries = () => state.entries.sort((a, b) => b.init - a.init || (b.dex ?? 0) - (a.dex ?? 0));
-      if (p.op === "add") {
+      if (p.op === "roll") {
+        // Server rolls initiative so nobody can fudge it: d20 + bonus, posted to chat too.
+        const bonus = Math.max(-10, Math.min(20, Math.round(Number(p.bonus) || 0)));
+        const r = rollDice(`1d20${bonus >= 0 ? "+" : ""}${bonus}`);
+        const name = String(p.name ?? d.user.display_name).slice(0, 60);
+        const hidden = d.isDM && !!p.hidden;
+        postChat(d.campaignId, d.user.id, "roll", { expression: r.expression, label: `${name} initiative`, total: r.total, detail: describeRoll(r), crit: r.crit }, hidden ? dmIdOf(d.campaignId) : null);
+        state.entries = state.entries.filter((e) => !(e.ownerId === d.user.id && e.name === name));
+        state.entries.push({ id: Date.now() + Math.random(), name, init: r.total, dex: bonus, hidden, ownerId: d.user.id, tokenId: p.tokenId ?? null });
+        sortEntries();
+      } else if (p.op === "add") {
         // Players can add their own character; the DM can add anything.
         const entry = { id: Date.now() + Math.random(), name: String(p.name ?? "?").slice(0, 60), init: Number(p.init) || 0, dex: Number(p.dex) || 0, hidden: d.isDM && !!p.hidden, ownerId: d.user.id, tokenId: p.tokenId ?? null };
         if (!d.isDM) state.entries = state.entries.filter((e) => !(e.ownerId === d.user.id && e.name === entry.name));

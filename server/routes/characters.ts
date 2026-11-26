@@ -150,7 +150,10 @@ characterRoutes.put("/characters/:id", (req, res) => {
     if (c.campaign_id) notify(c.campaign_id, "characters");
     return res.json({ applied: true });
   }
-  const changeId = submitChange(c.id, uid, c.status === "approved" ? "update" : "create", data, String(req.body?.note ?? ""));
+  // A character that was never approved has no "official" version to protect, so show the latest draft everywhere.
+  if (c.status !== "approved") run("UPDATE characters SET data = ?, name = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, c.id);
+  const kind = c.status === "approved" ? "update" : (one("SELECT kind FROM character_changes WHERE character_id = ? AND status = 'pending'", c.id)?.kind ?? "create");
+  const changeId = submitChange(c.id, uid, kind, data, String(req.body?.note ?? ""));
   notify(c.campaign_id, "approvals");
   res.json({ applied: false, changeId });
 });
@@ -240,7 +243,7 @@ characterRoutes.get("/campaigns/:id/approvals", (req, res) => {
       return {
         id: r.id,
         characterId: r.character_id,
-        characterName: r.char_name,
+        characterName: proposed.name || r.char_name,
         submitter: r.submitter,
         kind: r.kind,
         note: r.note,

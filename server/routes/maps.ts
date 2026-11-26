@@ -20,6 +20,10 @@ const listOut = (m: any) => ({
   height: m.height,
   gridType: m.grid_type,
   gridSize: m.grid_size,
+  gridOffsetX: m.grid_offset_x,
+  gridOffsetY: m.grid_offset_y,
+  feetPerCell: m.feet_per_cell,
+  fogEnabled: !!m.fog_enabled,
   createdAt: m.created_at,
 });
 
