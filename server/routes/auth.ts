@@ -1,0 +1,83 @@
+import { Router } from "express";
+import { all, one, run } from "../db.ts";
+import { COOKIE, createSession, hashPassword, newInviteCode, requireAdmin, requireUser, setSessionCookie, verifyPassword } from "../auth.ts";
+import { HttpError } from "../helpers.ts";
+import { AI_MODEL, aiEnabled } from "../ai.ts";
+
+export const authRoutes = Router();
+
+authRoutes.get("/status", (req, res) => {
+  const users = one("SELECT COUNT(*) AS n FROM users")!.n;
+  res.json({ needsSetup: users === 0, aiEnabled: aiEnabled(), aiModel: AI_MODEL, user: req.user ?? null });
+});
+
+authRoutes.post("/register", (req, res) => {
+  const { username, displayName, password, inviteCode } = req.body ?? {};
+  if (typeof username !== "string" || !/^[a-zA-Z0-9_.-]{3,30}$/.test(username))
+    throw new HttpError(400, "Username must be 3-30 letters, numbers, dots, dashes or underscores");
+  if (typeof password !== "string" || password.length < 8) throw new HttpError(400, "Password must be at least 8 characters");
+  const firstUser = one("SELECT COUNT(*) AS n FROM users")!.n === 0;
+  let invite;
+  if (!firstUser) {
+    invite = one("SELECT * FROM invites WHERE code = ? AND uses_left > 0", String(inviteCode ?? "").trim().toUpperCase());
+    if (!invite) throw new HttpError(400, "That invite code isn't valid. Ask your DM for one.");
+  }
+  if (one("SELECT id FROM users WHERE username = ?", username)) throw new HttpError(400, "That username is taken");
+  const name = typeof displayName === "string" && displayName.trim() ? displayName.trim().slice(0, 40) : username;
+  const r = run("INSERT INTO users (username, display_name, pass_hash, is_admin) VALUES (?,?,?,?)", username, name, hashPassword(password), firstUser ? 1 : 0);
+  if (invite) run("UPDATE invites SET uses_left = uses_left - 1 WHERE code = ?", invite.code);
+  setSessionCookie(res, createSession(Number(r.lastInsertRowid)));
+  res.json({ ok: true });
+});
+
+authRoutes.post("/login", (req, res) => {
+  const { username, password } = req.body ?? {};
+  const u = one("SELECT * FROM users WHERE username = ?", String(username ?? ""));
+  if (!u || !verifyPassword(String(password ?? ""), u.pass_hash)) throw new HttpError(401, "Wrong username or password");
+  setSessionCookie(res, createSession(u.id));
+  res.json({ ok: true });
+});
+
+authRoutes.post("/logout", (req, res) => {
+  const token = req.cookies?.[COOKIE];
+  if (token) run("DELETE FROM sessions WHERE token = ?", token);
+  res.clearCookie(COOKIE);
+  res.json({ ok: true });
+});
+
+authRoutes.post("/me/password", requireUser, (req, res) => {
+  const { current, next } = req.body ?? {};
+  const u = one("SELECT * FROM users WHERE id = ?", req.user!.id)!;
+  if (!verifyPassword(String(current ?? ""), u.pass_hash)) throw new HttpError(400, "Current password is wrong");
+  if (typeof next !== "string" || next.length < 8) throw new HttpError(400, "New password must be at least 8 characters");
+  run("UPDATE users SET pass_hash = ? WHERE id = ?", hashPassword(next), u.id);
+  res.json({ ok: true });
+});
+
+authRoutes.get("/users", requireUser, (_req, res) => {
+  res.json(all("SELECT id, username, display_name AS displayName, is_admin AS isAdmin FROM users ORDER BY display_name"));
+});
+
+// ---- invites (admin) ----
+authRoutes.get("/invites", requireUser, requireAdmin, (_req, res) => {
+  res.json(all("SELECT code, uses_left AS usesLeft, created_at AS createdAt FROM invites WHERE uses_left > 0 ORDER BY created_at DESC"));
+});
+authRoutes.post("/invites", requireUser, requireAdmin, (req, res) => {
+  const uses = Math.min(20, Math.max(1, Number(req.body?.uses) || 1));
+  const code = newInviteCode();
+  run("INSERT INTO invites (code, created_by, uses_left) VALUES (?,?,?)", code, req.user!.id, uses);
+  res.json({ code, usesLeft: uses });
+});
+authRoutes.delete("/invites/:code", requireUser, requireAdmin, (req, res) => {
+  run("DELETE FROM invites WHERE code = ?", req.params.code);
+  res.json({ ok: true });
+});
+
+// Admin can reset a forgotten password
+authRoutes.post("/users/:id/reset-password", requireUser, requireAdmin, (req, res) => {
+  const pw = String(req.body?.password ?? "");
+  if (pw.length < 8) throw new HttpError(400, "Password must be at least 8 characters");
+  run("UPDATE users SET pass_hash = ? WHERE id = ?", hashPassword(pw), Number(req.params.id));
+  run("DELETE FROM sessions WHERE user_id = ?", Number(req.params.id));
+  res.json({ ok: true });
+});

@@ -1,0 +1,298 @@
+import { Router } from "express";
+import { all, one, parseJSON, run, type Row } from "../db.ts";
+import { campaignRole, requireUser } from "../auth.ts";
+import { campaignAccess, campaignContext, HttpError, num } from "../helpers.ts";
+import { notify, broadcastMap } from "../realtime.ts";
+import { aiEnabled, reviewCharacter } from "../ai.ts";
+import { derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
+
+export const characterRoutes = Router();
+characterRoutes.use(requireUser);
+
+function rulesOf(campaignId: number | null): RulesVersion {
+  if (!campaignId) return "2014";
+  return (one("SELECT rules_version FROM campaigns WHERE id = ?", campaignId)?.rules_version ?? "2014") as RulesVersion;
+}
+
+function characterOut(c: Row, viewerId: number) {
+  const role = c.campaign_id ? campaignRole(c.campaign_id, viewerId) : undefined;
+  const isOwner = c.owner_id === viewerId;
+  const isDM = role === "dm";
+  const pending = isOwner || isDM ? one("SELECT * FROM character_changes WHERE character_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1", c.id) : undefined;
+  const lastReview = isOwner || isDM
+    ? one("SELECT status, dm_comment AS dmComment, reviewed_at AS reviewedAt FROM character_changes WHERE character_id = ? AND status != 'pending' ORDER BY id DESC LIMIT 1", c.id)
+    : undefined;
+  return {
+    id: c.id,
+    ownerId: c.owner_id,
+    ownerName: c.owner_name,
+    campaignId: c.campaign_id,
+    campaignName: c.campaign_name,
+    status: c.status,
+    name: c.name,
+    data: normalizeCharacter(parseJSON(c.data, {}), rulesOf(c.campaign_id)),
+    pending: pending
+      ? { id: pending.id, kind: pending.kind, note: pending.note, data: normalizeCharacter(parseJSON(pending.proposed, {})), aiReview: parseJSON(pending.ai_review, null), createdAt: pending.created_at }
+      : null,
+    lastReview: lastReview ?? null,
+    canEdit: isOwner || isDM,
+    isDM,
+  };
+}
+
+const SELECT = `SELECT c.*, u.display_name AS owner_name, cp.name AS campaign_name FROM characters c
+  JOIN users u ON u.id = c.owner_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id`;
+
+function loadCharacter(id: number, viewerId: number, needEdit = false) {
+  const c = one(`${SELECT} WHERE c.id = ?`, id);
+  if (!c) throw new HttpError(404, "Character not found");
+  const role = c.campaign_id ? campaignRole(c.campaign_id, viewerId) : undefined;
+  const isOwner = c.owner_id === viewerId;
+  if (!isOwner && !role) throw new HttpError(404, "Character not found");
+  if (needEdit && !isOwner && role !== "dm") throw new HttpError(403, "That's not your character");
+  return { c, isOwner, isDM: role === "dm" };
+}
+
+function cleanData(raw: unknown, rules: RulesVersion): CharacterData {
+  const d = normalizeCharacter(raw, rules);
+  const s = JSON.stringify(d);
+  if (s.length > 500_000) throw new HttpError(400, "That character sheet is too large");
+  d.name = String(d.name || "Unnamed").slice(0, 80);
+  return d;
+}
+
+/** Runs the AI rules check in the background and stores the result on the change. */
+async function runReview(changeId: number, userId: number) {
+  const ch = one("SELECT cc.*, c.campaign_id, c.data AS current FROM character_changes cc JOIN characters c ON c.id = cc.character_id WHERE cc.id = ?", changeId);
+  if (!ch || !ch.campaign_id || !aiEnabled()) return;
+  run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "running" }), changeId);
+  notify(ch.campaign_id, "approvals");
+  try {
+    const proposed = normalizeCharacter(parseJSON(ch.proposed, {}), rulesOf(ch.campaign_id));
+    const char = one("SELECT status FROM characters WHERE id = ?", ch.character_id)!;
+    const previous = char.status === "approved" && ch.kind === "update" ? parseJSON(ch.current, null) : null;
+    const reason =
+      ch.kind === "import"
+        ? "This character was brought over from another campaign (or uploaded from a file). Check it carefully for correctness under this campaign's rules."
+        : ch.kind === "create"
+          ? "This is a brand-new character submitted for approval."
+          : "The player edited their character (for example, leveled up) and submitted the changes for approval.";
+    const review = await reviewCharacter({ campaign: campaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), previous, reason });
+    run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "done", ...review }), changeId);
+  } catch (e) {
+    run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "error", error: (e as Error).message }), changeId);
+  }
+  notify(ch.campaign_id, "approvals");
+}
+
+function submitChange(characterId: number, userId: number, kind: "create" | "update" | "import", data: CharacterData, note: string) {
+  // One pending change per character: a new submission replaces the old one.
+  run("DELETE FROM character_changes WHERE character_id = ? AND status = 'pending'", characterId);
+  const r = run(
+    "INSERT INTO character_changes (character_id, submitted_by, kind, proposed, note) VALUES (?,?,?,?,?)",
+    characterId,
+    userId,
+    kind,
+    JSON.stringify(data),
+    note.slice(0, 1000),
+  );
+  return Number(r.lastInsertRowid);
+}
+
+characterRoutes.get("/characters", (req, res) => {
+  const uid = req.user!.id;
+  const campaignId = req.query.campaignId ? Number(req.query.campaignId) : null;
+  let rows: Row[];
+  if (campaignId) {
+    const role = campaignRole(campaignId, uid);
+    if (!role) throw new HttpError(404, "Campaign not found");
+    rows = all(`${SELECT} WHERE c.campaign_id = ? AND (c.status = 'approved' OR c.owner_id = ? OR ?) ORDER BY c.name`, campaignId, uid, role === "dm" ? 1 : 0);
+  } else {
+    rows = all(`${SELECT} WHERE c.owner_id = ? ORDER BY c.updated_at DESC`, uid);
+  }
+  res.json(rows.map((c) => characterOut(c, uid)));
+});
+
+characterRoutes.get("/characters/:id", (req, res) => {
+  const { c } = loadCharacter(num(req.params.id), req.user!.id);
+  res.json(characterOut(c, req.user!.id));
+});
+
+characterRoutes.post("/characters", (req, res) => {
+  const uid = req.user!.id;
+  const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null;
+  const role = campaignId ? campaignRole(campaignId, uid) : undefined;
+  if (campaignId && !role) throw new HttpError(404, "Campaign not found");
+  const data = cleanData(req.body?.data, rulesOf(campaignId));
+  // Characters outside a campaign, or made by the DM, don't need approval.
+  const autoApprove = !campaignId || role === "dm";
+  const r = run(
+    "INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?,?)",
+    uid,
+    campaignId,
+    data.name,
+    JSON.stringify(data),
+    autoApprove ? "approved" : "pending",
+  );
+  const id = Number(r.lastInsertRowid);
+  if (!autoApprove) submitChange(id, uid, "create", data, String(req.body?.note ?? ""));
+  if (campaignId) notify(campaignId, "characters");
+  res.json({ id });
+});
+
+// Full edit. Players' edits wait for the DM; the DM's edits apply right away.
+characterRoutes.put("/characters/:id", (req, res) => {
+  const uid = req.user!.id;
+  const { c, isDM } = loadCharacter(num(req.params.id), uid, true);
+  const data = cleanData(req.body?.data, rulesOf(c.campaign_id));
+  if (isDM || !c.campaign_id) {
+    run("UPDATE characters SET data = ?, name = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, c.id);
+    if (c.campaign_id) notify(c.campaign_id, "characters");
+    return res.json({ applied: true });
+  }
+  const changeId = submitChange(c.id, uid, c.status === "approved" ? "update" : "create", data, String(req.body?.note ?? ""));
+  notify(c.campaign_id, "approvals");
+  res.json({ applied: false, changeId });
+});
+
+// In-play tracking: HP, slots, death saves, etc. These change every session, so no approval needed.
+characterRoutes.patch("/characters/:id/play", (req, res) => {
+  const uid = req.user!.id;
+  const { c } = loadCharacter(num(req.params.id), uid, true);
+  const data = normalizeCharacter(parseJSON(c.data, {}), rulesOf(c.campaign_id));
+  const b = req.body ?? {};
+  if (b.hp) {
+    if (b.hp.current !== undefined) data.hp.current = Number(b.hp.current) || 0;
+    if (b.hp.temp !== undefined) data.hp.temp = Math.max(0, Number(b.hp.temp) || 0);
+  }
+  if (b.deathSaves) data.deathSaves = { successes: Math.min(3, Number(b.deathSaves.successes) || 0), failures: Math.min(3, Number(b.deathSaves.failures) || 0) };
+  if (Array.isArray(b.spellSlotsUsed)) data.spellSlotsUsed = b.spellSlotsUsed.slice(0, 9).map((n: unknown) => Math.max(0, Number(n) || 0));
+  if (b.pactSlotsUsed !== undefined) data.pactSlotsUsed = Math.max(0, Number(b.pactSlotsUsed) || 0);
+  if (b.inspiration !== undefined) data.inspiration = !!b.inspiration;
+  if (typeof b.notes === "string") data.notes = b.notes.slice(0, 50000);
+  run("UPDATE characters SET data = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), c.id);
+  // keep linked tokens' HP in sync
+  if (b.hp?.current !== undefined) {
+    run("UPDATE tokens SET hp = ? WHERE character_id = ?", data.hp.current, c.id);
+    if (c.campaign_id) broadcastMap(c.campaign_id);
+  }
+  if (c.campaign_id) notify(c.campaign_id, "characters");
+  res.json({ ok: true });
+});
+
+// Bring a character into another campaign (copy). Gets an automatic AI rules check.
+characterRoutes.post("/characters/:id/import", async (req, res) => {
+  const uid = req.user!.id;
+  const { c } = loadCharacter(num(req.params.id), uid);
+  if (c.owner_id !== uid) throw new HttpError(403, "You can only bring over your own characters");
+  const target = num(req.body?.campaignId);
+  const role = campaignRole(target, uid);
+  if (!role) throw new HttpError(404, "Campaign not found");
+  const data = cleanData(parseJSON(c.data, {}), rulesOf(target));
+  const from = c.campaign_name ? `"${c.campaign_name}"` : "your personal characters";
+  data.rulesVersion = rulesOf(target);
+  const r = run("INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?, 'pending')", uid, target, data.name, JSON.stringify(data));
+  const id = Number(r.lastInsertRowid);
+  const changeId = submitChange(id, uid, "import", data, `Brought over from ${from}. ${String(req.body?.note ?? "")}`.trim());
+  notify(target, "approvals");
+  res.json({ id });
+  void runReview(changeId, uid);
+});
+
+// Upload a character file (exported from this app) into a campaign
+characterRoutes.post("/characters/upload", (req, res) => {
+  const uid = req.user!.id;
+  const target = num(req.body?.campaignId);
+  if (!campaignRole(target, uid)) throw new HttpError(404, "Campaign not found");
+  const raw = req.body?.data?.data ?? req.body?.data; // accept an exported wrapper or bare data
+  const data = cleanData(raw, rulesOf(target));
+  data.rulesVersion = rulesOf(target);
+  const r = run("INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?, 'pending')", uid, target, data.name, JSON.stringify(data));
+  const id = Number(r.lastInsertRowid);
+  const changeId = submitChange(id, uid, "import", data, "Uploaded from a file.");
+  notify(target, "approvals");
+  res.json({ id });
+  void runReview(changeId, uid);
+});
+
+characterRoutes.delete("/characters/:id", (req, res) => {
+  const { c } = loadCharacter(num(req.params.id), req.user!.id, true);
+  run("DELETE FROM characters WHERE id = ?", c.id);
+  if (c.campaign_id) notify(c.campaign_id, "characters");
+  res.json({ ok: true });
+});
+
+// ---------- DM approvals ----------
+
+characterRoutes.get("/campaigns/:id/approvals", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const rows = all(
+    `SELECT cc.*, c.data AS current, c.status AS char_status, c.name AS char_name, u.display_name AS submitter
+     FROM character_changes cc JOIN characters c ON c.id = cc.character_id JOIN users u ON u.id = cc.submitted_by
+     WHERE c.campaign_id = ? AND cc.status = 'pending' ORDER BY cc.created_at`,
+    id,
+  );
+  const rules = rulesOf(id);
+  res.json(
+    rows.map((r) => {
+      const proposed = normalizeCharacter(parseJSON(r.proposed, {}), rules);
+      const current = r.char_status === "approved" ? normalizeCharacter(parseJSON(r.current, {}), rules) : null;
+      return {
+        id: r.id,
+        characterId: r.character_id,
+        characterName: r.char_name,
+        submitter: r.submitter,
+        kind: r.kind,
+        note: r.note,
+        createdAt: r.created_at,
+        changes: diffCharacter(current, proposed),
+        proposed,
+        aiReview: parseJSON(r.ai_review, null),
+      };
+    }),
+  );
+});
+
+function loadChange(req: { params: Record<string, string>; user?: Row }) {
+  const ch = one("SELECT cc.*, c.campaign_id FROM character_changes cc JOIN characters c ON c.id = cc.character_id WHERE cc.id = ?", num(req.params.changeId));
+  if (!ch || campaignRole(ch.campaign_id, req.user!.id) !== "dm") throw new HttpError(404, "Change not found");
+  if (ch.status !== "pending") throw new HttpError(400, "That change was already reviewed");
+  return ch;
+}
+
+characterRoutes.post("/changes/:changeId/approve", (req, res) => {
+  const ch = loadChange(req);
+  // The DM may tweak the sheet before approving.
+  const data = req.body?.data ? cleanData(req.body.data, rulesOf(ch.campaign_id)) : normalizeCharacter(parseJSON(ch.proposed, {}));
+  // Keep in-play values (HP, slots used...) that changed during play while the change was waiting.
+  const live = one("SELECT data, status FROM characters WHERE id = ?", ch.character_id)!;
+  if (live.status === "approved") {
+    const cur = normalizeCharacter(parseJSON(live.data, {}));
+    data.hp.current = cur.hp.current;
+    data.hp.temp = cur.hp.temp;
+    data.deathSaves = cur.deathSaves;
+    data.spellSlotsUsed = cur.spellSlotsUsed;
+    data.pactSlotsUsed = cur.pactSlotsUsed;
+    data.inspiration = cur.inspiration;
+  }
+  run("UPDATE characters SET data = ?, name = ?, status = 'approved', updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, ch.character_id);
+  run("UPDATE character_changes SET status = 'approved', dm_comment = ?, reviewed_at = datetime('now') WHERE id = ?", String(req.body?.comment ?? "").slice(0, 2000), ch.id);
+  notify(ch.campaign_id, "characters");
+  notify(ch.campaign_id, "approvals");
+  res.json({ ok: true });
+});
+
+characterRoutes.post("/changes/:changeId/reject", (req, res) => {
+  const ch = loadChange(req);
+  run("UPDATE character_changes SET status = 'rejected', dm_comment = ?, reviewed_at = datetime('now') WHERE id = ?", String(req.body?.comment ?? "").slice(0, 2000), ch.id);
+  notify(ch.campaign_id, "characters");
+  notify(ch.campaign_id, "approvals");
+  res.json({ ok: true });
+});
+
+characterRoutes.post("/changes/:changeId/ai-review", (req, res) => {
+  const ch = loadChange(req);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  void runReview(ch.id, req.user!.id);
+  res.json({ ok: true });
+});

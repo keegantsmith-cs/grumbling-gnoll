@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   pages INTEGER,
   page_from INTEGER,
   page_to INTEGER,
+  next_page INTEGER, -- where to resume if interrupted
   status TEXT NOT NULL DEFAULT 'queued', -- queued | processing | done | error
   progress TEXT NOT NULL DEFAULT '',
   error TEXT,
