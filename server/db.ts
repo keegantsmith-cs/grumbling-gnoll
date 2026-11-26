@@ -1,0 +1,180 @@
+import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+
+export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "./data");
+export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+export const db = new Database(path.join(DATA_DIR, "tabletop.db"));
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  display_name TEXT NOT NULL,
+  pass_hash TEXT NOT NULL,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS invites (
+  code TEXT PRIMARY KEY,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  uses_left INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  rules_version TEXT NOT NULL DEFAULT '2014',
+  dm_user_id INTEGER NOT NULL REFERENCES users(id),
+  dm_notes TEXT NOT NULL DEFAULT '',
+  active_map_id INTEGER,
+  initiative TEXT NOT NULL DEFAULT '{"round":1,"turn":0,"entries":[]}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS campaign_members (
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'player',
+  PRIMARY KEY (campaign_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS characters (
+  id INTEGER PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  campaign_id INTEGER REFERENCES campaigns(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  data TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS character_changes (
+  id INTEGER PRIMARY KEY,
+  character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  submitted_by INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL DEFAULT 'update', -- create | update | import
+  proposed TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+  ai_review TEXT,
+  dm_comment TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS maps (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  image_url TEXT,
+  generated TEXT, -- JSON layout for generated maps
+  width INTEGER NOT NULL,
+  height INTEGER NOT NULL,
+  grid_type TEXT NOT NULL DEFAULT 'square', -- square | hex | none
+  grid_size INTEGER NOT NULL DEFAULT 70,
+  grid_offset_x REAL NOT NULL DEFAULT 0,
+  grid_offset_y REAL NOT NULL DEFAULT 0,
+  feet_per_cell INTEGER NOT NULL DEFAULT 5,
+  fog_enabled INTEGER NOT NULL DEFAULT 1,
+  fog TEXT NOT NULL DEFAULT '[]',
+  dm_key TEXT NOT NULL DEFAULT '', -- DM-only room descriptions etc.
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS tokens (
+  id INTEGER PRIMARY KEY,
+  map_id INTEGER NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  size REAL NOT NULL DEFAULT 1,
+  color TEXT NOT NULL DEFAULT '#c0392b',
+  image_url TEXT,
+  character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+  controlled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  hp INTEGER,
+  max_hp INTEGER,
+  conditions TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS chat (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL, -- text | roll | system | share
+  body TEXT NOT NULL,
+  whisper_to INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS compendium (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE, -- null = shared by all campaigns
+  kind TEXT NOT NULL, -- monster | item | npc
+  name TEXT NOT NULL,
+  data TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  source_edition TEXT NOT NULL DEFAULT '5e',
+  status TEXT NOT NULL DEFAULT 'draft', -- draft | approved
+  player_visible INTEGER NOT NULL DEFAULT 0,
+  upload_id INTEGER,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS uploads (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  path TEXT NOT NULL,
+  edition TEXT NOT NULL,
+  pages INTEGER,
+  page_from INTEGER,
+  page_to INTEGER,
+  status TEXT NOT NULL DEFAULT 'queued', -- queued | processing | done | error
+  progress TEXT NOT NULL DEFAULT '',
+  error TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS ai_history (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  output TEXT NOT NULL,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_campaign ON chat(campaign_id, id);
+CREATE INDEX IF NOT EXISTS idx_tokens_map ON tokens(map_id);
+CREATE INDEX IF NOT EXISTS idx_changes_char ON character_changes(character_id, status);
+`);
+
+export type Row = Record<string, any>;
+
+export function one<T = Row>(sql: string, ...params: unknown[]): T | undefined {
+  return db.prepare(sql).get(...params) as T | undefined;
+}
+export function all<T = Row>(sql: string, ...params: unknown[]): T[] {
+  return db.prepare(sql).all(...params) as T[];
+}
+export function run(sql: string, ...params: unknown[]) {
+  return db.prepare(sql).run(...params);
+}
+
+export function parseJSON<T>(s: string | null | undefined, fallback: T): T {
+  if (!s) return fallback;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
+}
