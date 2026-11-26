@@ -1,5 +1,5 @@
 {
-  "name": "tabletop",
+  "name": "grumbling-gnoll",
   "version": "0.1.0",
   "scripts": {
     "dev": "concurrently -k -n server,client \"tsx watch server/index.ts\" \"vite\"",

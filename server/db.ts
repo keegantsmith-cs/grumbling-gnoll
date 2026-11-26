@@ -6,7 +6,7 @@ export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "./data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-export const db = new Database(path.join(DATA_DIR, "tabletop.db"));
+export const db = new Database(path.join(DATA_DIR, "grumbling-gnoll.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
