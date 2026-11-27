@@ -122,3 +122,13 @@ test("too many wrong passwords are slowed down", async () => {
   for (let i = 0; i < 9; i++) last = (await c.post("/login", { username: "joanna", password: "nope" })).status;
   assert.equal(last, 429);
 });
+
+test("items not in the SRD: player drafts are private until the DM approves; close SRD matches work", async () => {
+  assert.equal((await sam.get("/srd/magic/Onyx%20Dog%20(figurine)")).data.name, "Onyx Dog Figurine of Wondrous Power");
+  const r = (await sam.post(`/campaigns/${campaignId}/compendium/custom`, { kind: "item", name: "Grukk's Lucky Tankard", data: { description: "Never spills." } })).data;
+  assert.equal(r.status, "draft");
+  assert.equal((await sam.get(`/campaigns/${campaignId}/compendium/lookup?kind=item&name=grukks%20lucky%20tankard`)).data.name, "Grukk's Lucky Tankard");
+  assert.equal((await jo.get(`/campaigns/${campaignId}/compendium/lookup?kind=item&name=grukks%20lucky%20tankard`)).data, null);
+  await dm.patch(`/compendium/${r.id}`, { status: "approved" });
+  assert.equal((await jo.get(`/campaigns/${campaignId}/compendium/lookup?kind=item&name=lucky%20tankard`)).data.name, "Grukk's Lucky Tankard");
+});

@@ -5,13 +5,13 @@ import { all, one, parseJSON, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignAccessById, campaignContext, HttpError, num, pdfUpload } from "../helpers.ts";
 import { notify } from "../realtime.ts";
-import { aiEnabled, convertPdfChunk, EDITIONS, npcStatBlock } from "../ai.ts";
+import { aiEnabled, convertPdfChunk, describeThing, EDITIONS, npcStatBlock } from "../ai.ts";
 import { discordAlertDM } from "../discord.ts";
 
 export const compendiumRoutes = Router();
 compendiumRoutes.use(requireUser);
 
-const KINDS = ["monster", "item", "npc", "note"];
+const KINDS = ["monster", "item", "npc", "note", "spell"];
 
 const entryOut = (e: any) => ({
   id: e.id,
@@ -32,7 +32,7 @@ compendiumRoutes.get("/campaigns/:id/compendium", (req, res) => {
   const { id, isDM } = campaignAccess(req);
   const rows = isDM
     ? all("SELECT * FROM compendium WHERE campaign_id = ? ORDER BY status = 'approved', kind, name", id)
-    : all("SELECT * FROM compendium WHERE campaign_id = ? AND status = 'approved' AND player_visible = 1 ORDER BY kind, name", id);
+    : all("SELECT * FROM compendium WHERE campaign_id = ? AND ((status = 'approved' AND player_visible = 1) OR created_by = ?) ORDER BY kind, name", id, req.user!.id);
   const out = rows.map(entryOut);
   if (!isDM) for (const e of out) if (e.kind === "npc") { delete e.data.statblock; delete e.data.statReference; } // NPC stats stay secret
   res.json(out);
@@ -77,6 +77,53 @@ compendiumRoutes.post("/campaigns/:id/compendium/approve-all", (req, res) => {
   );
   notify(id, "compendium");
   res.json({ approved: r.changes });
+});
+
+// ---- items and spells that aren't in the SRD ----
+
+const lookupName = (n: string) => n.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9+ ]/g, " ").split(/\s+/).filter((w) => w.length > 1 && !["of", "the", "a", "an"].includes(w));
+
+/** Find a campaign entry by name (close matches too), respecting what this person may see. */
+compendiumRoutes.get("/campaigns/:id/compendium/lookup", (req, res) => {
+  const { id, isDM } = campaignAccess(req);
+  const kinds = String(req.query.kind ?? "item").split(",").filter((k) => KINDS.includes(k));
+  const words = lookupName(String(req.query.name ?? ""));
+  if (!words.length || !kinds.length) return res.json(null);
+  const rows = all(`SELECT * FROM compendium WHERE campaign_id = ? AND kind IN (${kinds.map(() => "?").join(",")})`, id, ...kinds)
+    .filter((e) => isDM || (e.status === "approved" && e.player_visible) || e.created_by === req.user!.id);
+  const exact = rows.find((e) => lookupName(e.name).join(" ") === words.join(" "));
+  const close = rows.filter((e) => { const n = lookupName(e.name).join(" "); return words.every((w) => n.includes(w)); }).sort((a, b) => a.name.length - b.name.length)[0];
+  const e = exact ?? close;
+  res.json(e ? entryOut(e) : null);
+});
+
+/** Anyone in the campaign can add details for something. The DM's go straight in; players' wait as drafts. */
+compendiumRoutes.post("/campaigns/:id/compendium/custom", (req, res) => {
+  const { id, isDM } = campaignAccess(req);
+  const b = req.body ?? {};
+  const kind = b.kind === "spell" ? "spell" : "item";
+  const name = String(b.name ?? b.data?.name ?? "").trim().slice(0, 120);
+  if (!name) throw new HttpError(400, "Give it a name");
+  const data = { ...(b.data ?? {}), name };
+  if (JSON.stringify(data).length > 60000) throw new HttpError(400, "That's too long");
+  const r = run(
+    "INSERT INTO compendium (campaign_id, kind, name, data, source, source_edition, status, player_visible, created_by) VALUES (?,?,?,?,?,?,?,?,?)",
+    id, kind, name, JSON.stringify(data), isDM ? "Added by the DM" : `Added by ${req.user!.display_name}`, "5e",
+    isDM ? "approved" : "draft", isDM ? (b.playerVisible === false ? 0 : 1) : 1, req.user!.id,
+  );
+  if (!isDM) discordAlertDM(id, "📖 New item details to review", `**${req.user!.display_name}** added details for **${name}**. It's a draft in the Compendium until you approve it.`, `/#/c/${id}/compendium`);
+  notify(id, "compendium");
+  res.json({ id: Number(r.lastInsertRowid), status: isDM ? "approved" : "draft" });
+});
+
+/** Let the AI draft the details (the person reviews before saving). */
+compendiumRoutes.post("/campaigns/:id/compendium/ai-describe", async (req, res) => {
+  const { id } = campaignAccess(req);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const name = String(req.body?.name ?? "").trim().slice(0, 120);
+  if (!name) throw new HttpError(400, "Give it a name");
+  const kind = req.body?.kind === "spell" ? "spell" : "item";
+  res.json(await describeThing(campaignContext(id), req.user!.id, kind, name, String(req.body?.hint ?? "").slice(0, 500)));
 });
 
 // ---- duplicates ----

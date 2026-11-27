@@ -790,3 +790,45 @@ If the log is thin, keep it short and don't invent events.`;
     friendlyError(e);
   }
 }
+
+// ---------- Describing items/spells that aren't in the SRD ----------
+
+export const CustomSpellSchema = z.object({
+  name: z.string(),
+  level: z.number(),
+  school: z.string(),
+  casting_time: z.string(),
+  range: z.string(),
+  components: z.string(),
+  duration: z.string(),
+  description: z.string(),
+  higher_levels: z.string(),
+  conversion_notes: z.string(),
+  source_page: z.string(),
+});
+
+export async function describeThing(ctx: CampaignContext, userId: number, kind: "item" | "spell", name: string, hint: string) {
+  const anthropic = getClient();
+  const schema = kind === "spell" ? CustomSpellSchema : ItemSchema;
+  const prompt = `Write a D&D 5th Edition (${ctx.rulesVersion} rules) ${kind === "spell" ? "spell" : "magic item or piece of equipment"} entry for "${name}" for this group's private campaign reference.
+${hint ? `The player/DM says: ${hint}\n` : ""}
+- If this is a known published ${kind}, summarize how it works accurately and completely, in your own words (don't quote books). Put the book it comes from in source_page if you know it.
+- If you don't recognize it, design a balanced version that fits the name, and say clearly in conversion_notes that it's a suggestion for the DM to check.
+- description: everything needed to use it at the table (what it does, actions, charges, duration, limits).
+- conversion_notes: anything uncertain or worth the DM double-checking ("" if none).`;
+  try {
+    const msg = await anthropic.beta.messages.parse({
+      ...callParams("assistant"),
+      max_tokens: 8000,
+      output_config: { effort: "low", format: betaZodOutputFormat(schema) },
+      system: campaignSystem(ctx),
+      messages: [{ role: "user", content: prompt }],
+    });
+    checkStop(msg);
+    if (!msg.parsed_output) throw new AIError("The description came back in an unexpected format. Try again.");
+    logUsage(ctx.id, userId, `describe-${kind}`, name, { name }, msg);
+    return msg.parsed_output;
+  } catch (e) {
+    friendlyError(e);
+  }
+}

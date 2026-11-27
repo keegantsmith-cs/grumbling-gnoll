@@ -45,7 +45,9 @@ const equipment = load("5e-SRD-Equipment.json").map((e) => ({
   desc: join(e.desc),
 }));
 
-const magicItems = load("5e-SRD-Magic-Items.json").filter((m) => !m.variant).map((m) => ({
+// Include variants too (e.g. "Onyx Dog Figurine of Wondrous Power", "+1 Longsword"), skipping exact duplicates
+const seenItems = new Set();
+const magicItems = load("5e-SRD-Magic-Items.json").filter((m) => !seenItems.has(m.name) && seenItems.add(m.name)).map((m) => ({
   name: m.name,
   category: m.equipment_category?.name ?? "",
   rarity: m.rarity?.name ?? "",

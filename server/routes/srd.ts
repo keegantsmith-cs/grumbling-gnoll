@@ -41,7 +41,14 @@ srdRoutes.get("/srd/:type/:name", (req, res) => {
   const t = req.params.type as T;
   if (!(t in TYPES)) throw new HttpError(404, "Unknown type");
   const name = decodeURIComponent(req.params.name).toLowerCase();
-  const e = srd()[TYPES[t]].find((x) => x.name.toLowerCase() === name);
+  const list = srd()[TYPES[t]];
+  let e = list.find((x) => x.name.toLowerCase() === name);
+  // Close matches: "Onyx Dog (figurine)" finds "Onyx Dog Figurine of Wondrous Power"
+  if (!e) {
+    const words = name.replace(/['’]/g, "").replace(/[^a-z0-9+ ]/g, " ").split(/\s+/).filter((w) => w.length > 1 && !["of", "the", "a", "an"].includes(w));
+    const hits = words.length ? list.filter((x) => { const n = x.name.toLowerCase().replace(/['’]/g, ""); return words.every((w) => n.includes(w)); }) : [];
+    e = hits.sort((a, b) => a.name.length - b.name.length)[0];
+  }
   if (!e) throw new HttpError(404, "Not in the SRD");
   res.json({ ...e, type: t });
 });

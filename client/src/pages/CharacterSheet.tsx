@@ -9,7 +9,7 @@ import { ALIGNMENTS, EXTRA_CLASSES, backgroundsFor, speciesFor, subclassesFor } 
 import { StatusPill } from "./Home";
 import { FullBody, Portrait } from "../components/Portrait";
 import { Markdown } from "../components/Markdown";
-import { SrdInfo, SrdInput, spellSummary, type SrdEntry } from "../components/SrdLookup";
+import { LookupCampaign, SrdInfo, SrdInput, spellSummary, type SrdEntry } from "../components/SrdLookup";
 
 type Roll = (expr: string, label: string) => void;
 
@@ -61,6 +61,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   const otherCampaigns = (campaigns.data ?? []).filter((x) => x.id !== c.campaignId);
 
   return (
+    <LookupCampaign.Provider value={c.campaignId ?? null}>
     <div>
       <div className="row">
         <Portrait url={d.portraitUrl} canEdit={canEdit} characterId={id} name={d.name}
@@ -223,6 +224,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
         </div>
       </div>
     </div>
+    </LookupCampaign.Provider>
   );
 }
 

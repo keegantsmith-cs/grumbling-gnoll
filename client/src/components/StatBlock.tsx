@@ -52,6 +52,7 @@ export function ItemCard({ it }: { it: any }) {
       <div><i>{it.item_type}, {it.rarity}{it.requires_attunement ? ` (requires attunement${it.attunement_note ? " " + it.attunement_note : ""})` : ""}</i></div>
       <div className="rule" />
       <div style={{ whiteSpace: "pre-wrap" }}>{it.description}</div>
+      {it.source_page && <p style={{ fontSize: 12 }}><i>{it.source_page}</i></p>}
     </div>
   );
 }
@@ -59,10 +60,27 @@ export function ItemCard({ it }: { it: any }) {
 export function EntryView({ e }: { e: any }) {
   if (e.kind === "monster") return <StatBlock m={e.data} />;
   if (e.kind === "item") return <ItemCard it={e.data} />;
+  if (e.kind === "spell") return <SpellCard s={e.data} />;
   return (
     <>
       <Markdown text={e.data.markdown ?? e.data.text ?? ""} />
       {e.data.statblock && <div style={{ marginTop: 10 }}><StatBlock m={e.data.statblock} /></div>}
     </>
+  );
+}
+
+export function SpellCard({ s }: { s: any }) {
+  return (
+    <div className="statblock">
+      <h3>{s.name}</h3>
+      <div><i>{Number(s.level) === 0 ? `${s.school || ""} cantrip` : `Level ${s.level} ${String(s.school || "").toLowerCase()}`}</i></div>
+      <div className="rule" />
+      <div><b>Casting time</b> {s.casting_time} · <b>Range</b> {s.range}</div>
+      <div><b>Components</b> {s.components} · <b>Duration</b> {s.duration}</div>
+      <div className="rule" />
+      <div style={{ whiteSpace: "pre-wrap" }}>{s.description}</div>
+      {s.higher_levels && <p><b>At higher levels.</b> {s.higher_levels}</p>}
+      {s.source_page && <p style={{ fontSize: 12 }}><i>{s.source_page}</i></p>}
+    </div>
   );
 }

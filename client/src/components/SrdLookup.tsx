@@ -1,5 +1,7 @@
 // Search-as-you-type for free SRD 5.1 content (spells, gear, magic items, monsters).
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useStatus } from "../hooks";
+import { EntryView } from "./StatBlock";
 import { api } from "../api";
 import { Markdown } from "./Markdown";
 
@@ -67,15 +69,29 @@ export function spellSummary(s: SrdEntry) {
   return [s.castingTime, s.range, s.attack ? `${s.attack} spell attack` : s.save ? `${s.save} save` : "", s.damage ? `${s.damage} ${String(s.damageType).toLowerCase()}` : "", s.duration !== "Instantaneous" ? s.duration : ""].filter(Boolean).join(" · ");
 }
 
-/** "ⓘ" button that shows the full SRD text for a name, if it's in the SRD. */
+/** Which campaign the sheet belongs to, so lookups can include the campaign's own Compendium. */
+export const LookupCampaign = createContext<number | null>(null);
+
+/** "ⓘ" button: shows the campaign's own entry, else the SRD text, else lets you add the details. */
 export function SrdInfo({ type, name }: { type: SrdType; name: string }) {
+  const campaignId = useContext(LookupCampaign);
   const [entry, setEntry] = useState<SrdEntry | null | "none">(null);
+  const [custom, setCustom] = useState<any | null>(null);
   const [open, setOpen] = useState(false);
   if (!name.trim()) return null;
+  const kind = type === "spell" ? "spell" : "item";
   const show = async () => {
     setOpen(true);
-    if (entry && entry !== "none" && entry.name.toLowerCase() === name.toLowerCase()) return;
-    // Gear and magic items share a box on the sheet, so try both
+    setEntry(null);
+    setCustom(null);
+    // 1. this campaign's Compendium (homebrew and other books)
+    if (campaignId) {
+      try {
+        const c = await api.get<any>(`/campaigns/${campaignId}/compendium/lookup?kind=${kind}&name=${encodeURIComponent(name.trim())}`);
+        if (c) { setCustom(c); return; }
+      } catch { /* fall through to the SRD */ }
+    }
+    // 2. the free SRD (gear and magic items share a box on the sheet, so try both)
     const order: SrdType[] = type === "equipment" ? ["equipment", "magic"] : type === "magic" ? ["magic", "equipment"] : [type];
     for (const t of order) {
       try { setEntry(await api.get<SrdEntry>(`/srd/${t}/${encodeURIComponent(name.trim())}`)); return; } catch { /* try the next kind */ }
@@ -87,16 +103,94 @@ export function SrdInfo({ type, name }: { type: SrdType; name: string }) {
       <button type="button" className="small" title="Look it up" onClick={show}>ⓘ</button>
       {open && (
         <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 160, display: "grid", placeItems: "center", padding: 16 }}>
-          <div className="card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 620, maxHeight: "85vh", overflow: "auto", marginBottom: 0 }}>
-            <div className="row"><h2 className="grow" style={{ margin: 0 }}>{name}</h2><button className="small" onClick={() => setOpen(false)}>✕</button></div>
-            {entry === null && <p className="muted">Looking it up...</p>}
-            {entry === "none" && <p className="muted">"{name}" isn't in the free SRD. It may be from another book or homebrew.</p>}
-            {entry && entry !== "none" && <SrdDetails e={entry} />}
-            <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Text from the System Reference Document 5.1 by Wizards of the Coast LLC, CC-BY-4.0.</p>
+          <div className="card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, width: "100%", maxHeight: "88vh", overflow: "auto", marginBottom: 0 }}>
+            <div className="row"><h2 className="grow" style={{ margin: 0 }}>{custom?.name ?? (entry && entry !== "none" ? entry.name : name)}</h2><button className="small" onClick={() => setOpen(false)}>✕</button></div>
+            {custom && (
+              <>
+                <p className="muted" style={{ fontSize: 12 }}>From your campaign's Compendium{custom.status === "draft" ? " · draft waiting for the DM" : ""} · {custom.source}</p>
+                <EntryView e={custom} />
+              </>
+            )}
+            {!custom && entry === null && <p className="muted">Looking it up...</p>}
+            {!custom && entry && entry !== "none" && (
+              <>
+                <SrdDetails e={entry} />
+                <p className="muted" style={{ fontSize: 11, marginBottom: 0 }}>Text from the System Reference Document 5.1 by Wizards of the Coast LLC, CC-BY-4.0.</p>
+              </>
+            )}
+            {!custom && entry === "none" && (
+              campaignId
+                ? <AddDetails campaignId={campaignId} kind={kind} name={name.trim()} onSaved={(c) => setCustom(c)} />
+                : <p className="muted">"{name}" isn't in the free SRD. Open this character inside a campaign to add its details to the campaign's Compendium.</p>
+            )}
           </div>
         </div>
       )}
     </>
+  );
+}
+
+/** Form for items/spells from other books or homebrew, with an optional AI first draft. */
+function AddDetails({ campaignId, kind, name, onSaved }: { campaignId: number; kind: "item" | "spell"; name: string; onSaved: (entry: any) => void }) {
+  const { status, toast } = useStatus();
+  const isItem = kind === "item";
+  const [f, setF] = useState<Record<string, any>>(isItem
+    ? { name, item_type: "Wondrous item", rarity: "uncommon", requires_attunement: false, attunement_note: "", description: "", conversion_notes: "", source_page: "" }
+    : { name, level: 1, school: "", casting_time: "1 action", range: "", components: "V, S", duration: "Instantaneous", description: "", higher_levels: "", conversion_notes: "", source_page: "" });
+  const [hint, setHint] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: unknown) => setF({ ...f, [k]: v });
+
+  async function draft() {
+    setBusy(true);
+    try { setF({ ...f, ...(await api.post(`/campaigns/${campaignId}/compendium/ai-describe`, { kind, name: f.name, hint })) }); }
+    catch (e) { toast((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function save() {
+    try {
+      const r = await api.post(`/campaigns/${campaignId}/compendium/custom`, { kind, name: f.name, data: f });
+      toast(r.status === "approved" ? "Saved to the Compendium" : "Saved. Your DM will review it, and you can already see it.");
+      onSaved({ id: r.id, kind, name: f.name, data: f, status: r.status, source: "just added" });
+    } catch (e) { toast((e as Error).message); }
+  }
+
+  return (
+    <div>
+      <p className="muted">"{name}" isn't in the free SRD. It may be from another book or homebrew. Add its details so everyone in the campaign can look it up.</p>
+      {status.aiEnabled && (
+        <div className="row" style={{ marginBottom: 8 }}>
+          <input className="grow" value={hint} onChange={(e) => setHint(e.target.value)} placeholder="Optional hint for the AI: book, what it does..." />
+          <button disabled={busy} onClick={draft}>{busy ? "Writing..." : "✨ Draft it with AI"}</button>
+        </div>
+      )}
+      <label>Name<input value={f.name} onChange={(e) => set("name", e.target.value)} /></label>
+      {isItem ? (
+        <div className="row">
+          <label className="grow">Type<input value={f.item_type} onChange={(e) => set("item_type", e.target.value)} placeholder="Wondrous item, weapon (longsword)..." /></label>
+          <label>Rarity
+            <select value={f.rarity} onChange={(e) => set("rarity", e.target.value)} style={{ width: "auto" }}>
+              {["mundane", "common", "uncommon", "rare", "very rare", "legendary", "artifact", "varies"].map((r) => <option key={r}>{r}</option>)}
+            </select>
+          </label>
+          <label className="inline"><input type="checkbox" checked={f.requires_attunement} onChange={(e) => set("requires_attunement", e.target.checked)} /> Requires attunement</label>
+        </div>
+      ) : (
+        <div className="row">
+          <label>Level<select value={f.level} onChange={(e) => set("level", Number(e.target.value))} style={{ width: 90 }}>{Array.from({ length: 10 }, (_, l) => <option key={l} value={l}>{l === 0 ? "Cantrip" : l}</option>)}</select></label>
+          <label className="grow">School<input value={f.school} onChange={(e) => set("school", e.target.value)} /></label>
+          <label className="grow">Casting time<input value={f.casting_time} onChange={(e) => set("casting_time", e.target.value)} /></label>
+          <label className="grow">Range<input value={f.range} onChange={(e) => set("range", e.target.value)} /></label>
+          <label className="grow">Components<input value={f.components} onChange={(e) => set("components", e.target.value)} /></label>
+          <label className="grow">Duration<input value={f.duration} onChange={(e) => set("duration", e.target.value)} /></label>
+        </div>
+      )}
+      <label>What it does<textarea rows={7} value={f.description} onChange={(e) => set("description", e.target.value)} /></label>
+      {!isItem && <label>At higher levels<input value={f.higher_levels} onChange={(e) => set("higher_levels", e.target.value)} /></label>}
+      <label>Source (book and page, or "homebrew")<input value={f.source_page} onChange={(e) => set("source_page", e.target.value)} /></label>
+      {f.conversion_notes && <div className="notice"><b>AI notes:</b> {f.conversion_notes}</div>}
+      <button className="primary" disabled={!f.name.trim() || !f.description.trim()} onClick={save}>Save to the Compendium</button>
+    </div>
   );
 }
 
