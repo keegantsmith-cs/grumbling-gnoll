@@ -20,6 +20,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
   const campaignInfo = useLoad<any>(c?.isDM && c.campaignId ? `/campaigns/${c.campaignId}` : null, [c?.isDM, c?.campaignId]);
+  const allUsers = useLoad<any[]>(c?.isDM && c.campaignId ? "/users" : null, [c?.isDM, c?.campaignId]);
 
   useEffect(() => {
     if (c) {
@@ -70,15 +71,8 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
       <p className="muted">
         Level {dv.level} {d.species} {classSummary(d)} · played by{" "}
         {c.isDM && campaignInfo.data ? (
-          <select style={{ width: "auto", padding: "1px 6px" }} value={c.ownerId} title="Change who plays this character"
-            onChange={async (e) => {
-              const who = campaignInfo.data.members.find((m: any) => m.id === Number(e.target.value));
-              if (!confirm(`Give ${d.name} to ${who?.displayName}? They'll be able to edit it and move its token.`)) return;
-              try { await api.post(`/characters/${id}/owner`, { userId: Number(e.target.value) }); toast(`${d.name} now belongs to ${who?.displayName}`); reload(); }
-              catch (err) { toast((err as Error).message); }
-            }}>
-            {campaignInfo.data.members.map((m: any) => <option key={m.id} value={m.id}>{m.displayName}{m.role === "dm" ? " (DM)" : ""}</option>)}
-          </select>
+          <OwnerPicker c={c} name={d.name} members={campaignInfo.data.members} users={allUsers.data ?? []}
+            onDone={() => { reload(); campaignInfo.reload(); }} />
         ) : c.ownerName}
         {c.campaignName ? ` · ${c.campaignName}` : " · not in a campaign"} · {d.rulesVersion} rules
       </p>
@@ -413,5 +407,37 @@ function DmSecretNotes({ id, initial, name }: { id: number; initial: string; nam
         </>
       )}
     </div>
+  );
+}
+
+/** DM picks who plays this character: anyone with an account (people not in the campaign get added to it). */
+function OwnerPicker({ c, name, members, users, onDone }: { c: any; name: string; members: any[]; users: any[]; onDone: () => void }) {
+  const { toast } = useStatus();
+  const memberIds = new Set(members.map((m) => m.id));
+  const others = users.filter((u) => !memberIds.has(u.id));
+  async function change(userId: number) {
+    const who = members.find((m) => m.id === userId) ?? others.find((u) => u.id === userId);
+    const adding = !memberIds.has(userId);
+    if (!confirm(`Give ${name} to ${who?.displayName}?${adding ? ` They'll also be added to this campaign as a player.` : ""} They'll be able to edit it and move its token.`)) return;
+    try {
+      await api.post(`/characters/${c.id}/owner`, { userId });
+      toast(`${name} now belongs to ${who?.displayName}`);
+      onDone();
+    } catch (err) { toast((err as Error).message); }
+  }
+  return (
+    <>
+      <select style={{ width: "auto", padding: "1px 6px" }} value={c.ownerId} title="Change who plays this character" onChange={(e) => change(Number(e.target.value))}>
+        <optgroup label="In this campaign">
+          {members.map((m) => <option key={m.id} value={m.id}>{m.displayName}{m.role === "dm" ? " (DM)" : ""}</option>)}
+        </optgroup>
+        {others.length > 0 && (
+          <optgroup label="Not in this campaign yet (adds them)">
+            {others.map((u) => <option key={u.id} value={u.id}>{u.displayName}</option>)}
+          </optgroup>
+        )}
+      </select>
+      {members.length + others.length <= 1 && <span className="muted" style={{ fontSize: 12 }}> (no players yet: create invite codes on the home page)</span>}
+    </>
   );
 }
