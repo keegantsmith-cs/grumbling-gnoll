@@ -94,6 +94,27 @@ authRoutes.delete("/invites/:code", requireUser, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Admin: download a full backup (database + uploaded files) right now
+authRoutes.get("/admin/backup", requireUser, requireAdmin, async (_req, res) => {
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const fs = await import("node:fs");
+  const { execFile } = await import("node:child_process");
+  const { db, DATA_DIR } = await import("../db.ts");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gnoll-dl-"));
+  const out = path.join(tmp, "backup.tar.gz");
+  try {
+    await db.backup(path.join(tmp, "grumbling-gnoll.db"));
+    const args = ["-czf", out, "-C", tmp, "grumbling-gnoll.db"];
+    if (fs.existsSync(path.join(DATA_DIR, "uploads"))) args.push("-C", DATA_DIR, "uploads");
+    await new Promise<void>((ok, fail) => execFile("tar", args, (e) => (e ? fail(e) : ok())));
+    res.download(out, `grumbling-gnoll-backup-${new Date().toISOString().slice(0, 10)}.tar.gz`, () => fs.rmSync(tmp, { recursive: true, force: true }));
+  } catch (e) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
+});
+
 // Admin can reset a forgotten password
 authRoutes.post("/users/:id/reset-password", requireUser, requireAdmin, (req, res) => {
   const pw = String(req.body?.password ?? "");

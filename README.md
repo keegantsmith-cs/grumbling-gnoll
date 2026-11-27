@@ -59,11 +59,12 @@ bash /opt/grumbling-gnoll/deploy/update.sh
 
 ### Backups
 
-The installer makes a nightly backup of the database and uploaded files in `/var/backups/grumbling-gnoll` and keeps 14 days. Download one to your computer now and then:
+- **Every night** the server saves a backup (database + uploaded files) in `/var/backups/grumbling-gnoll` and keeps 14 days.
+- **Any time:** as admin, go to **Account → Backups → Download a full backup now** and keep the file on your computer.
+- **Whole-server snapshots (easiest off-server option):** in DigitalOcean, open the droplet → **Backups** → enable. It costs about 20% of the droplet price for weekly (30% for daily) and can restore the entire server in a few clicks.
+- **Free off-server copies (optional):** create a free bucket at Cloudflare R2 or Backblaze B2, then fill in the `BACKUP_S3_...` lines in `/opt/grumbling-gnoll/.env`. Each nightly backup is then also copied there and kept for 60 days. Run `bash /opt/grumbling-gnoll/deploy/backup.sh` once to test it.
 
-```bash
-scp root@YOUR.SERVER.IP:/var/backups/grumbling-gnoll/backup-*.tar.gz .
-```
+To restore from a backup file: stop the site (`systemctl stop grumbling-gnoll`), unpack the file into `/opt/grumbling-gnoll/data` (`tar -xzf backup.tar.gz -C /opt/grumbling-gnoll/data`), run `chown -R gnoll:gnoll /opt/grumbling-gnoll/data`, then start it again (`systemctl start grumbling-gnoll`).
 
 ---
 

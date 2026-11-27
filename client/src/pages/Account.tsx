@@ -27,6 +27,12 @@ export function Account() {
       {!!status.user?.is_admin && status.aiEnabled && <AISettings />}
       {!!status.user?.is_admin && (
         <div className="card">
+          <div className="row" style={{ marginBottom: 10 }}>
+            <h2 className="grow" style={{ margin: 0 }}>Backups</h2>
+            <a className="btn primary" href="/api/admin/backup" style={{ textDecoration: "none", background: "var(--red-dark)", color: "#fff" }}>⬇ Download a full backup now</a>
+          </div>
+          <p className="muted">One file with everything: the database (accounts, campaigns, characters, chat, compendium) and all uploaded maps, pictures and PDFs. The server also makes one every night. Keep a copy on your own computer now and then.</p>
+          <hr />
           <h2>Players (admin)</h2>
           <p className="muted">If someone forgets their password, set a temporary one here and tell them.</p>
           <table className="list"><tbody>

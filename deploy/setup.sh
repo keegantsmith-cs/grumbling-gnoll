@@ -22,7 +22,7 @@ fi
 
 echo "==> Installing system packages"
 apt-get update -y
-apt-get install -y curl git build-essential poppler-utils debian-keyring debian-archive-keyring apt-transport-https ufw
+apt-get install -y curl git build-essential poppler-utils rclone debian-keyring debian-archive-keyring apt-transport-https ufw
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
   echo "==> Installing Node.js 22"
@@ -97,12 +97,10 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
-echo "==> Nightly backup of the database and uploads (keeps 14 days)"
+echo "==> Nightly backup of the database and uploads (14 days on the server, optional off-server copy)"
 cat > /etc/cron.daily/grumbling-gnoll-backup <<'CRON'
 #!/bin/sh
-mkdir -p /var/backups/grumbling-gnoll
-tar -czf /var/backups/grumbling-gnoll/backup-$(date +%F).tar.gz -C /opt/grumbling-gnoll data
-find /var/backups/grumbling-gnoll -name 'backup-*.tar.gz' -mtime +14 -delete
+/bin/bash /opt/grumbling-gnoll/deploy/backup.sh >> /var/log/grumbling-gnoll-backup.log 2>&1
 CRON
 chmod +x /etc/cron.daily/grumbling-gnoll-backup
 
