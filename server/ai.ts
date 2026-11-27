@@ -489,7 +489,11 @@ const AdventureChunkSchema = z.object({
     dm_notes: z.string(),
     read_aloud: z.string(),
   })),
-  npcs: z.array(z.object({ name: z.string(), role: z.string(), description: z.string(), where: z.string() })),
+  npcs: z.array(z.object({
+    name: z.string(), role: z.string(), description: z.string(), where: z.string(),
+    stat_reference: z.string(),
+    stats: MonsterSchema.nullable(),
+  })),
   monsters: z.array(MonsterSchema),
   items: z.array(ItemSchema),
 });
@@ -522,6 +526,9 @@ Build the run-guide for these pages:
   - dm_notes: Markdown bullets with what the DM needs at the table: key NPCs and their motives, creatures and numbers, traps/hazards with DCs (converted to 5e), treasure, clues, and where things lead next. Keep it tight.
   - read_aloud: the most important boxed/read-aloud text, condensed, or "" if none.
 - npcs: named characters introduced on these pages (not ones only mentioned in passing).
+  - If the NPC's own stat block is printed here, put it in stats${is5e ? "" : " (converted to 5e)"} and don't repeat it under monsters.
+  - If the text says to use a standard stat block (e.g. "use the Bandit Captain statistics", or old-edition stats like "F5, AC 4, hp 30"), put that in stat_reference${is5e ? "" : " along with the closest 5e equivalent"}, and set stats to null.
+  - Otherwise stat_reference is "" and stats is null.
 - monsters: ${is5e ? "only NEW or unique creatures with full stat blocks printed on these pages (skip standard Monster Manual creatures that are only referenced)" : "every creature with stats on these pages, converted to 5e"}.
 - items: magic items described on these pages${is5e ? "" : ", converted to 5e"}.
 Skip front matter, credits, ads, and the table of contents. Use empty lists when there's nothing.`,
@@ -560,6 +567,33 @@ export async function adventureSynopsis(ctx: CampaignContext, userId: number, ti
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
     logUsage(ctx.id, userId, "adventure-synopsis", title, text, msg.usage);
     return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}
+
+// ---------- NPC stat blocks ----------
+
+export async function npcStatBlock(ctx: CampaignContext, userId: number, npcText: string, reference: string, extra: string) {
+  const anthropic = getClient();
+  try {
+    const msg = await anthropic.beta.messages.parse({
+      model: AI_MODEL,
+      max_tokens: 16000,
+      ...fallbackParams(),
+      output_config: { effort: "medium", format: betaZodOutputFormat(MonsterSchema) },
+      system: campaignSystem(ctx),
+      messages: [{
+        role: "user",
+        content: `Create a D&D 5e (${ctx.rulesVersion} rules) stat block for this NPC.\n\n${npcText}\n${reference ? `\nThe adventure says: ${reference}. Base the stat block on that (use the 5e equivalent), adjusted to fit the character.` : ""}${extra ? `\nDM's request: ${extra}` : ""}
+
+Make it fit who they are (a scholar shouldn't fight like a knight). Pick a challenge rating that suits their role in the story and the party described above; follow the 5e DMG guidelines for CR so the numbers are balanced. Give them 1-3 signature traits or actions that show their personality. Use proper 5e formatting for attacks ("Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 7 (1d8 + 3) slashing damage."). In conversion_notes, briefly say how you chose the CR. Put the original page as "" in source_page.`,
+      }],
+    });
+    checkStop(msg);
+    if (!msg.parsed_output) throw new AIError("The stat block came back in an unexpected format. Try again.");
+    logUsage(ctx.id, userId, "npc-stats", npcText.slice(0, 100), { name: msg.parsed_output.name }, msg.usage);
+    return msg.parsed_output;
   } catch (e) {
     friendlyError(e);
   }

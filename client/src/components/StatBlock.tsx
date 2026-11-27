@@ -59,5 +59,10 @@ export function ItemCard({ it }: { it: any }) {
 export function EntryView({ e }: { e: any }) {
   if (e.kind === "monster") return <StatBlock m={e.data} />;
   if (e.kind === "item") return <ItemCard it={e.data} />;
-  return <Markdown text={e.data.markdown ?? e.data.text ?? ""} />;
+  return (
+    <>
+      <Markdown text={e.data.markdown ?? e.data.text ?? ""} />
+      {e.data.statblock && <div style={{ marginTop: 10 }}><StatBlock m={e.data.statblock} /></div>}
+    </>
+  );
 }

@@ -222,7 +222,9 @@ async function readAdventure(a: any) {
       if (one("SELECT id FROM compendium WHERE adventure_id = ? AND kind = 'npc' AND name = ?", a.id, n.name)) continue;
       run(
         "INSERT INTO compendium (campaign_id, kind, name, data, source, source_edition, status, adventure_id, created_by) VALUES (?,?,?,?,?,?,'approved',?,?)",
-        a.campaign_id, "npc", n.name, JSON.stringify({ markdown: `# ${n.name}\n*${n.role}*${n.where ? ` · ${n.where}` : ""}\n\n${n.description}` }), source, a.edition, a.id, a.created_by,
+        a.campaign_id, "npc", n.name,
+        JSON.stringify({ markdown: `# ${n.name}\n*${n.role}*${n.where ? ` · ${n.where}` : ""}\n\n${n.description}`, statReference: n.stat_reference, statblock: n.stats ?? undefined }),
+        source, a.edition, a.id, a.created_by,
       );
     }
     for (const m of chunk.monsters)

@@ -82,11 +82,31 @@ function EntryEditor({ campaign, entry, close, onDelete }: { campaign: Campaign;
   const [name, setName] = useState(entry.name);
   const [visible, setVisible] = useState(entry.playerVisible);
   const isStruct = entry.kind === "monster" || entry.kind === "item";
+  const [statJson, setStatJson] = useState(entry.data.statblock ? JSON.stringify(entry.data.statblock, null, 2) : "");
+  const [statRequest, setStatRequest] = useState("");
+  const [making, setMaking] = useState(false);
+
+  async function makeStats() {
+    setMaking(true);
+    try {
+      const r = await api.post(`/compendium/${entry.id}/npc-stats`, { request: statRequest });
+      setData({ ...data, statblock: r.statblock });
+      setStatJson(JSON.stringify(r.statblock, null, 2));
+      toast("Stat block ready");
+    } catch (e) { toast((e as Error).message); }
+    finally { setMaking(false); }
+  }
 
   async function save(status = entry.status) {
     let d = data;
     if (isStruct && mode === "edit") {
       try { d = JSON.parse(json); } catch { return toast("The stat block text isn't valid. Check for a missing comma or quote."); }
+    }
+    if (entry.kind === "npc" && mode === "edit" && statJson.trim()) {
+      try { d = { ...d, statblock: JSON.parse(statJson) }; } catch { return toast("The stat block text isn't valid. Check for a missing comma or quote."); }
+    } else if (entry.kind === "npc" && mode === "edit" && !statJson.trim()) {
+      const { statblock: _drop, ...rest } = d;
+      d = rest;
     }
     const body = { kind: entry.kind, name: name || d.name, data: d, status, playerVisible: visible };
     if (entry.id) await api.patch(`/compendium/${entry.id}`, body);
@@ -111,7 +131,20 @@ function EntryEditor({ campaign, entry, close, onDelete }: { campaign: Campaign;
           {isStruct
             ? <label>Stat block (edit the values between quotes)<textarea rows={22} style={{ fontFamily: "monospace", fontSize: 12 }} value={json} onChange={(e) => setJson(e.target.value)} /></label>
             : <label>Text (Markdown: # heading, **bold**, - list)<textarea rows={14} value={data.markdown ?? ""} onChange={(e) => setData({ ...data, markdown: e.target.value })} /></label>}
+          {entry.kind === "npc" && statJson && <label>Stat block (edit the values between quotes; clear it to remove)<textarea rows={14} style={{ fontFamily: "monospace", fontSize: 12 }} value={statJson} onChange={(e) => setStatJson(e.target.value)} /></label>}
         </>
+      )}
+      {entry.kind === "npc" && entry.id && campaign.isDM && (
+        <div className="card" style={{ background: "var(--panel-2)", marginTop: 10, marginBottom: 0 }}>
+          <b>⚔️ Stats</b>{" "}
+          {data.statReference && <span className="muted">The adventure says: <i>{data.statReference}</i></span>}
+          {!data.statblock && !data.statReference && <span className="muted">No stats in the source.</span>}
+          <div className="row" style={{ marginTop: 6 }}>
+            <input className="grow" value={statRequest} onChange={(e) => setStatRequest(e.target.value)} placeholder="Optional: e.g. 'make her a CR 5 spellcaster' or 'tougher, the party is level 8'" />
+            <button disabled={making} onClick={makeStats}>{making ? "Making stats..." : data.statblock ? "✨ Remake stats" : "✨ Make stats with AI"}</button>
+          </div>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>Players never see NPC stat blocks, even when the NPC is shared with them.</p>
+        </div>
       )}
       <div className="row" style={{ marginTop: 10 }}>
         <label className="inline"><input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} /> Players can see</label>

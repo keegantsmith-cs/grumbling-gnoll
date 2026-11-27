@@ -3,9 +3,9 @@ import fs from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
 import { all, one, parseJSON, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
-import { campaignAccess, campaignAccessById, HttpError, num, pdfUpload } from "../helpers.ts";
+import { campaignAccess, campaignAccessById, campaignContext, HttpError, num, pdfUpload } from "../helpers.ts";
 import { notify } from "../realtime.ts";
-import { aiEnabled, convertPdfChunk, EDITIONS } from "../ai.ts";
+import { aiEnabled, convertPdfChunk, EDITIONS, npcStatBlock } from "../ai.ts";
 import { discordAlertDM } from "../discord.ts";
 
 export const compendiumRoutes = Router();
@@ -18,7 +18,7 @@ const entryOut = (e: any) => ({
   campaignId: e.campaign_id,
   kind: e.kind,
   name: e.name,
-  data: parseJSON(e.data, {}),
+  data: parseJSON<Record<string, any>>(e.data, {}),
   source: e.source,
   sourceEdition: e.source_edition,
   status: e.status,
@@ -33,7 +33,9 @@ compendiumRoutes.get("/campaigns/:id/compendium", (req, res) => {
   const rows = isDM
     ? all("SELECT * FROM compendium WHERE campaign_id = ? ORDER BY status = 'approved', kind, name", id)
     : all("SELECT * FROM compendium WHERE campaign_id = ? AND status = 'approved' AND player_visible = 1 ORDER BY kind, name", id);
-  res.json(rows.map(entryOut));
+  const out = rows.map(entryOut);
+  if (!isDM) for (const e of out) if (e.kind === "npc") { delete e.data.statblock; delete e.data.statReference; } // NPC stats stay secret
+  res.json(out);
 });
 
 compendiumRoutes.post("/campaigns/:id/compendium", (req, res) => {
@@ -90,6 +92,18 @@ compendiumRoutes.patch("/compendium/:entryId", (req, res) => {
   if (keys.length) run(`UPDATE compendium SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...keys.map((k) => set[k]), e.id);
   notify(e.campaign_id, "compendium");
   res.json({ ok: true });
+});
+
+// Give an NPC a 5e stat block (from the adventure's reference, or made to fit)
+compendiumRoutes.post("/compendium/:entryId/npc-stats", async (req, res) => {
+  const e = loadEntry(num(req.params.entryId), req.user!.id);
+  if (e.kind !== "npc") throw new HttpError(400, "Stat blocks can only be made for NPCs here");
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const data = parseJSON<any>(e.data, {});
+  const sb = await npcStatBlock(campaignContext(e.campaign_id), req.user!.id, `${e.name}\n${String(data.markdown ?? "").slice(0, 6000)}`, String(data.statReference ?? ""), String(req.body?.request ?? "").slice(0, 500));
+  run("UPDATE compendium SET data = ? WHERE id = ?", JSON.stringify({ ...data, statblock: sb }), e.id);
+  notify(e.campaign_id, "compendium");
+  res.json({ statblock: sb });
 });
 
 compendiumRoutes.delete("/compendium/:entryId", (req, res) => {
