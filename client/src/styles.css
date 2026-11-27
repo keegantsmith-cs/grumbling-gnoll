@@ -66,7 +66,7 @@ input[type="checkbox"], input[type="radio"] { width: auto; accent-color: var(--r
 input[type="color"] { padding: 0; height: 30px; width: 44px; }
 textarea { resize: vertical; min-height: 70px; }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--gold); }
-label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 label > input, label > select, label > textarea { margin-top: 3px; color: var(--text); }
 /* labels sit above their boxes, even when the box has a fixed width */
 label:not(.inline) > input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) { display: block; }
@@ -102,6 +102,9 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 12
 .pill.bad { border-color: var(--red); color: #ff9b85; }
 
 .error { background: #3a1610; border: 1px solid var(--red); color: #ffc4b5; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; }
+/* friendly "nothing here yet" box */
+.empty { border: 1px dashed var(--line); border-radius: var(--radius); padding: 20px 16px; text-align: center; color: var(--muted); margin: 8px 0 14px; }
+.empty b { color: var(--text); }
 .notice { background: #2b2412; border: 1px solid #806a2c; color: #f3dfa5; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #000d; border: 1px solid var(--gold); padding: 8px 14px; border-radius: 8px; z-index: 100; }
 
@@ -115,7 +118,14 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .board-toolbar { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; background: #000a; padding: 6px; border-radius: 8px; max-width: calc(100% - 20px); }
 .board-toolbar button { padding: 4px 9px; font-size: 13px; min-height: 32px; }
 .board-toolbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
-.board-hint { position: absolute; bottom: 10px; left: 10px; z-index: 5; background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--muted); pointer-events: none; }
+.board-toolbar .fog-group { display: contents; }
+.board-toolbar .fog-toggle[aria-expanded="true"] { background: #3a2f22; }
+.zoom-btns { position: absolute; right: 10px; bottom: 10px; z-index: 5; display: flex; flex-direction: column; gap: 4px; background: #000a; padding: 4px; border-radius: 8px; }
+.zoom-btns button { min-width: 38px; min-height: 36px; padding: 4px 6px; font-size: 16px; line-height: 1; }
+.zoom-btns button:last-child { font-size: 12px; }
+.board-notice { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4; max-width: min(360px, calc(100% - 32px)); text-align: center; background: #000c; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 18px; color: var(--muted); pointer-events: none; }
+.board-notice b { color: var(--gold); font-family: Cinzel, Georgia, serif; display: block; margin-bottom: 4px; font-size: 15px; }
+.board-hint { position: absolute; bottom: 10px; left: 10px; z-index: 5; max-width: calc(100% - 80px); background: #000a; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--muted); pointer-events: none; }
 .side { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
 .side-tabs { display: flex; border-bottom: 1px solid var(--line); }
 .side-tabs button { flex: 1; border: 0; border-radius: 0; background: none; padding: 10px 4px; min-height: 40px; color: var(--muted); font-size: 14px; }
@@ -161,6 +171,10 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .skill-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .skill-row .val { width: 34px; text-align: right; font-weight: 600; cursor: pointer; color: var(--gold); border-radius: 4px; }
 .skill-row .val:hover, .ability .modv:hover { color: #fff; text-decoration: underline; }
+.spell-row { gap: 6px; }
+.item-flags { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.coin { width: 62px; }
+.spell-level { width: 100px; }
 .slots { display: flex; gap: 4px; flex-wrap: wrap; }
 .slot { width: 20px; height: 20px; padding: 0; border: 2px solid var(--gold); border-radius: 50%; cursor: pointer; background: transparent; }
 .slot.used { background: var(--gold); }
@@ -187,6 +201,10 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .tabs { gap: 0; }
   .tabs button { padding: 10px 8px; }
 }
+@media (max-width: 1280px) {
+  /* tablets and small laptops: drop the tab icons so every tab fits on one line */
+  .tabs .tab-icon { display: none; }
+}
 @media (max-width: 1100px) {
   .table-layout { grid-template-columns: 1fr 300px; }
 }
@@ -203,6 +221,15 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
 }
 @media (max-width: 600px) {
   .abilities { grid-template-columns: repeat(3, 1fr); }
+  /* phones: stretchy boxes get a real minimum width, so rows wrap instead of squashing them to nothing */
+  .row > .grow { flex: 1 1 110px; min-width: min(110px, 100%); }
+  .coin { width: 56px; }
+  .spell-level { width: 92px; padding-left: 6px; padding-right: 4px; }
+  .topbar { padding: 8px 12px; }
+  .topbar .brand { font-size: 16px; }
+  .tabs { padding: 0 8px; }
+  .tabs > .brand { flex-basis: 100%; padding-top: 8px; }
+  .sheet-head h1 { font-size: 22px; }
 }
 
 /* right-click menu on the map */

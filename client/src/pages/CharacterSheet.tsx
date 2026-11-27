@@ -63,7 +63,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   return (
     <LookupCampaign.Provider value={c.campaignId ?? null}>
     <div>
-      <div className="row">
+      <div className="row sheet-head">
         <Portrait url={d.portraitUrl} canEdit={canEdit} characterId={id} name={d.name}
           onChange={(portraitUrl) => play({ portraitUrl }, { portraitUrl })} />
         <h1 className="grow" style={{ margin: 0 }}>{d.name}</h1>
@@ -373,9 +373,9 @@ function SpellsEditor({ d, dv, upd, play }: { d: CharacterData; dv: ReturnType<t
       )}
       {hasSlots && <button type="button" className="small" style={{ margin: "4px 0 8px" }} onClick={() => play({ spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0], pactSlotsUsed: 0 }, { spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0], pactSlotsUsed: 0 })}>Long rest (reset slots)</button>}
       {d.spells.map((s, i) => (
-        <div key={i} className="row" style={{ marginBottom: 4 }}>
+        <div key={i} className="row spell-row" style={{ marginBottom: 4 }}>
           <input type="checkbox" title="Prepared" aria-label={`${s.name || "Spell"} prepared`} checked={s.prepared} onChange={(e) => setSpell(i, { prepared: e.target.checked })} />
-          <select value={s.level} aria-label="Spell level" onChange={(e) => setSpell(i, { level: Number(e.target.value) })} style={{ width: 84 }}>
+          <select className="spell-level" value={s.level} aria-label="Spell level" onChange={(e) => setSpell(i, { level: Number(e.target.value) })}>
             {Array.from({ length: 10 }, (_, l) => <option key={l} value={l}>{l === 0 ? "Cantrip" : `Lvl ${l}`}</option>)}
           </select>
           <SrdInput className="grow" value={s.name} placeholder="Spell name" types={["spell"]} onChange={(v) => setSpell(i, { name: v })} onPick={(e) => setSpell(i, { name: e.name, level: e.level, notes: spellSummary(e) })} />
@@ -411,7 +411,7 @@ function InventoryEditor({ d, dv, upd }: { d: CharacterData; dv: ReturnType<type
       <h3>Equipment</h3>
       <div className="row" style={{ marginBottom: 6 }}>
         {(["cp", "sp", "ep", "gp", "pp"] as const).map((k) => (
-          <label key={k} style={{ width: 62 }}>{k.toUpperCase()}<input type="number" value={d.currency[k]} onChange={(e) => upd({ currency: { ...d.currency, [k]: Number(e.target.value) } })} /></label>
+          <label key={k} className="coin">{k.toUpperCase()}<input type="number" value={d.currency[k]} onChange={(e) => upd({ currency: { ...d.currency, [k]: Number(e.target.value) } })} /></label>
         ))}
       </div>
       {d.inventory.map((it, i) => (
@@ -419,9 +419,11 @@ function InventoryEditor({ d, dv, upd }: { d: CharacterData; dv: ReturnType<type
           <input type="number" value={it.qty} aria-label="Quantity" title="Quantity" style={{ width: 52 }} onChange={(e) => set(i, { qty: Number(e.target.value) })} />
           <SrdInput className="grow" value={it.name} placeholder="Item" types={["equipment", "magic"]} onChange={(v) => set(i, { name: v })} onPick={(e) => pickItem(i, e)} />
           <SrdInfo type="equipment" name={it.name} />
+          <span className="item-flags">
           <label className="inline" title="Equipped" style={{ marginRight: 4 }}><input type="checkbox" checked={it.equipped} onChange={(e) => set(i, { equipped: e.target.checked })} />Worn</label>
           <label className="inline" title="Attuned" style={{ marginRight: 4 }}><input type="checkbox" checked={it.attuned} onChange={(e) => set(i, { attuned: e.target.checked })} />Attuned</label>
           <button type="button" className="small danger" title="Remove item" aria-label={`Remove ${it.name || "item"}`} onClick={() => upd({ inventory: d.inventory.filter((_, j) => j !== i) })}>✕</button>
+          </span>
         </div>
       ))}
       {attuned > 3 && <div className="error">More than 3 attuned items. 5e allows 3.</div>}

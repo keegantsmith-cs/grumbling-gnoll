@@ -95,13 +95,13 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
         </form>
       )}
 
-      <table className="list">
+      {maps.data && maps.data.length > 0 && <table className="list">
         <thead><tr><th>Map</th><th>Grid</th><th>Fog</th><th></th></tr></thead>
         <tbody>
           {maps.data?.map((m) => <MapRow key={m.id} m={m} active={m.id === activeId} show={show} reload={maps.reload} toast={toast} />)}
         </tbody>
-      </table>
-      {maps.data?.length === 0 && <p className="muted">No maps yet.</p>}
+      </table>}
+      {maps.data?.length === 0 && !mode && <div className="empty"><b>No maps yet.</b><br />Upload a picture of a map, or let the site draw a random dungeon for you, using the buttons above.</div>}
       {activeId && <button style={{ marginTop: 10 }} onClick={() => show(null)}>Take the map off the table</button>}
       {advMaps.data && advMaps.data.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>

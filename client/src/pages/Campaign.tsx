@@ -54,8 +54,8 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
       <div className="tabs">
         <span className="brand" style={{ alignSelf: "center", marginRight: 12, whiteSpace: "nowrap" }}>{campaign.name}</span>
         {tabs.map(([k, label, count]) => (
-          <button key={k} className={tab === k ? "active" : ""} onClick={() => go(`c/${id}/${k}`)}>
-            {label}
+          <button key={k} className={tab === k ? "active" : ""} aria-current={tab === k ? "page" : undefined} onClick={() => go(`c/${id}/${k}`)}>
+            <span className="tab-icon" aria-hidden="true">{label.split(" ")[0]} </span>{label.slice(label.indexOf(" ") + 1)}
             {!!count && <span className="badge">{count}</span>}
           </button>
         ))}

@@ -10,7 +10,7 @@ export function Approvals({ campaign, data, reload }: { campaign: Campaign; data
     <div>
       <h1>Waiting for your approval</h1>
       <p className="muted">New characters, level-ups and edits from players land here. Characters brought in from other campaigns get an automatic AI rules check. You can run one on anything else too.</p>
-      {data.length === 0 && <p>Nothing to review. 🍺</p>}
+      {data.length === 0 && <div className="empty"><b>All caught up. 🍺</b><br />When a player makes a character or edits one, it shows up here for you to approve.</div>}
       {data.map((a) => <ApprovalCard key={a.id} a={a} campaign={campaign} reload={reload} />)}
     </div>
   );

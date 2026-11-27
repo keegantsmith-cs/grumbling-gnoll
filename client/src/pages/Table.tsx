@@ -97,23 +97,51 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
   const [measure, setMeasure] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   const [draft, setDraft] = useState<FogShape | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // The DM's fog tools fold away behind one "Fog" button; open by default on roomy screens, and the choice is remembered
+  const [fogOpen, setFogOpenState] = useState(() => {
+    const saved = localStorage.getItem("gnoll-fog-tools");
+    return saved ? saved === "open" : window.innerWidth >= 1300;
+  });
+  const setFogOpen = (open: boolean) => {
+    setFogOpenState(open);
+    localStorage.setItem("gnoll-fog-tools", open ? "open" : "closed");
+    if (!open && (tool === "reveal" || tool === "revealRect" || tool === "hideRect")) setTool("select");
+  };
   const [encounterAt, setEncounterAt] = useState<{ x: number; y: number } | null | undefined>(undefined); // undefined = closed
   const image = useHtmlImage(map.imageUrl);
   const generated = useMemo(() => (map.generated ? renderGenerated(map.generated, map.gridSize, isDM) : null), [map.generated, map.gridSize, isDM]);
 
-  // Fit the map to the screen on first load
+  // Fit the map to the screen on first load (and from the "Fit" button)
+  const fit = () => {
+    const el = wrap.current;
+    if (!el) return;
+    // leave room for the toolbar on top and the hint line at the bottom, so nothing starts hidden under them
+    const tb = el.querySelector<HTMLElement>(".board-toolbar");
+    const top = tb ? tb.offsetTop + tb.offsetHeight + 8 : 0, bottom = 40;
+    const h = Math.max(100, el.clientHeight - top - bottom);
+    const scale = Math.min(el.clientWidth / map.width, h / map.height, 1.5);
+    setView({ scale, x: (el.clientWidth - map.width * scale) / 2, y: top + (h - map.height * scale) / 2 });
+  };
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
     const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
     ro.observe(el);
-    const scale = Math.min(el.clientWidth / map.width, el.clientHeight / map.height, 1.5);
-    setView({ scale, x: (el.clientWidth - map.width * scale) / 2, y: (el.clientHeight - map.height * scale) / 2 });
+    fit();
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.id]);
 
   const pointer = () => layerRef.current?.getRelativePointerPosition() ?? { x: 0, y: 0 };
+
+  // zoom buttons: zoom around the middle of the board (handy on tablets and trackpads)
+  function zoomBy(factor: number) {
+    const scale = Math.min(6, Math.max(0.1, view.scale * factor));
+    const cx = size.w / 2, cy = size.h / 2;
+    const mx = (cx - view.x) / view.scale, my = (cy - view.y) / view.scale;
+    setView({ scale, x: cx - mx * scale, y: cy - my * scale });
+  }
+  const touch = useMemo(() => window.matchMedia?.("(pointer: coarse)").matches ?? false, []);
 
   function onWheel(e: Konva.KonvaEventObject<WheelEvent>) {
     e.evt.preventDefault();
@@ -192,6 +220,8 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         {isDM && map.fogEnabled && (
           <>
             <span className="sep" aria-hidden="true" />
+            <button className="fog-toggle" aria-expanded={fogOpen} onClick={() => setFogOpen(!fogOpen)} title={fogOpen ? "Hide the fog tools" : "Show the fog tools"}>🌫️ Fog {fogOpen ? "▾" : "▸"}</button>
+            {fogOpen && <span className="fog-group">
             <ToolBtn t="reveal" cur={tool} set={setTool} label="🖌️ Reveal" title="Paint to remove fog" />
             <ToolBtn t="revealRect" cur={tool} set={setTool} label="▭ Reveal area" />
             <ToolBtn t="hideRect" cur={tool} set={setTool} label="▬ Hide area" />
@@ -203,13 +233,23 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
             <button onClick={() => live.socket?.emit("fog", { op: "undo" })} title="Undo last fog change" aria-label="Undo last fog change">↶ Undo</button>
             <button onClick={() => confirm("Reveal the whole map?") && live.socket?.emit("fog", { op: "clear" })}>Reveal all</button>
             <button onClick={() => confirm("Cover the whole map in fog again?") && live.socket?.emit("fog", { op: "reset" })}>Reset fog</button>
+            </span>}
           </>
         )}
         <span className="sep" aria-hidden="true" />
         <button className={showAdd ? "active" : ""} aria-pressed={showAdd} onClick={() => setShowAdd(!showAdd)}>{isDM ? "+ Token" : "+ My token"}</button>
         {isDM && <button onClick={() => setEncounterAt(null)}>⚔️ Encounter</button>}
       </div>
-      <div className="board-hint">{tool === "select" ? <>Scroll to zoom · drag to pan · right-click for more · </> : null}{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
+      {!isDM && map.fogEnabled && !map.fog.some((f) => f.mode === "reveal") && (
+        <div className="board-notice" role="status"><b>Shrouded in fog</b>Your DM will reveal the map as you explore. Chat and dice work as usual.</div>
+      )}
+      <div className="board-hint">{tool === "select" ? (touch ? <>Drag to pan · tap a token to edit it · </> : <>Scroll to zoom · drag to pan · right-click for more · </>) : null}{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
+
+      <div className="zoom-btns" role="group" aria-label="Zoom">
+        <button onClick={() => zoomBy(1.25)} aria-label="Zoom in" title="Zoom in">+</button>
+        <button onClick={() => zoomBy(1 / 1.25)} aria-label="Zoom out" title="Zoom out">−</button>
+        <button onClick={fit} title="Fit the whole map on screen">Fit</button>
+      </div>
 
       <Stage
         width={size.w}
@@ -235,7 +275,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           <RingsLayer map={map} tokens={map.tokens} scale={view.scale} />
           <PoiLayer map={map} scale={view.scale} isDM={isDM} onPick={(p, s) => setPoiOpen({ p, at: s })} />
           {map.tokens.map((t) => (
-            <TokenNode key={t.id} t={t} map={map} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
+            <TokenNode key={t.id} t={t} map={map} scale={view.scale} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
               onSelect={() => setSelected(t.id)}
               onMove={(x, y) => live.socket?.emit("token:move", { id: t.id, x, y })} />
           ))}
@@ -322,13 +362,16 @@ function FogShapes({ map, draft }: { map: MapState; draft: FogShape | null }) {
   );
 }
 
-function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token; map: MapState; draggable: boolean; selected: boolean; onSelect: () => void; onMove: (x: number, y: number) => void }) {
+function TokenNode({ t, map, scale, draggable, selected, onSelect, onMove }: { t: Token; map: MapState; scale: number; draggable: boolean; selected: boolean; onSelect: () => void; onMove: (x: number, y: number) => void }) {
   const img = useHtmlImage(t.imageUrl);
   const r = (map.gridSize * t.size) / 2 * 0.92;
   const hpPct = t.hp != null && t.maxHp ? Math.max(0, Math.min(1, t.hp / t.maxHp)) : null;
+  const [hover, setHover] = useState(false);
   return (
     <Group
       name={`token-${t.id}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       x={t.x}
       y={t.y}
       draggable={draggable}
@@ -348,7 +391,7 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
         </Group>
       )}
       {!img && <Text text={(t.name.match(/^(\S).*?\s(\d+)$/) ? `${t.name[0]}${t.name.match(/(\d+)$/)![1]}` : t.name.slice(0, 2)).toUpperCase()} fontSize={r * 0.8} fill="#fff" fontStyle="bold" width={r * 2} x={-r} y={-r * 0.4} align="center" />}
-      <Text text={t.name} fontSize={Math.max(11, map.gridSize * 0.2)} fill="#fff" stroke="#000" strokeWidth={0.5} width={r * 4} x={-r * 2} y={r + 2} align="center" />
+      <TokenLabel t={t} r={r} cell={map.gridSize * t.size} scale={scale} focus={selected || hover} />
       {hpPct != null && (
         <>
           <Rect x={-r} y={-r - 9} width={r * 2} height={6} fill="#000" cornerRadius={3} />
@@ -362,6 +405,30 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
           <Line points={[r * 0.6, -r * 0.6, -r * 0.6, r * 0.6]} stroke="#d9534f" strokeWidth={r * 0.18} lineCap="round" />
         </>
       )}
+    </Group>
+  );
+}
+
+/**
+ * Name under a token, 12px on screen on a dark backdrop so it reads over any map art.
+ * Short name normally ("Mirabel", "Skeleton 2"); full name when selected or pointed at.
+ * When zoomed far out (or the name is too long for its square) the names would pile on top of each other,
+ * so then they only show on hover/selection.
+ */
+function TokenLabel({ t, r, cell, scale, focus }: { t: Token; r: number; cell: number; scale: number; focus: boolean }) {
+  if (!focus && cell * scale < 44) return null;
+  const numbered = /\s\d+$/.test(t.name);
+  const text = focus || numbered ? t.name : t.name.split(/\s+/)[0];
+  const fontSize = 12 / scale;
+  const maxW = focus ? 260 / scale : Math.max(cell * 1.15, r * 2);
+  // measure so the backdrop hugs the text; a name that won't fit waits for hover/selection (the token shows its initials)
+  const needed = text.length * fontSize * 0.58 + 8 / scale;
+  if (!focus && needed > maxW) return null;
+  const width = Math.min(maxW, needed);
+  return (
+    <Group y={r + 3 / scale} listening={false}>
+      <Rect x={-width / 2} y={0} width={width} height={fontSize + 6 / scale} fill="#000" opacity={0.7} cornerRadius={4 / scale} />
+      <Text text={text} fontSize={fontSize} fill="#fff" width={width} x={-width / 2} y={3 / scale} align="center" wrap="none" ellipsis />
     </Group>
   );
 }

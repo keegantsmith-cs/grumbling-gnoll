@@ -97,7 +97,7 @@ function AdventureList({ campaign, changed }: { campaign: Campaign; changed: { w
           ))}
         </tbody>
       </table>
-      {list.data?.length === 0 && <p className="muted">No adventures yet.</p>}
+      {list.data?.length === 0 && <div className="empty"><b>No adventures yet.</b><br />Upload a PDF of an adventure you own above, and it becomes a run guide plus monsters and NPCs for your Compendium.</div>}
     </div>
   );
 }

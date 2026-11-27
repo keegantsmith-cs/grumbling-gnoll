@@ -73,7 +73,7 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
           );
         })}
       </div>
-      {list.data?.length === 0 && <p className="muted">No characters yet.</p>}
+      {list.data?.length === 0 && <div className="empty"><b>No characters yet.</b><br />Click "Create a character" above and the site walks you through it step by step.</div>}
 
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Bring a character from elsewhere</h3>
