@@ -383,6 +383,41 @@ async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
   }
 }
 
+// What happened to this character over time: approvals, send-backs, and every AI adjustment with its reasons.
+characterRoutes.get("/characters/:id/history", (req, res) => {
+  const { c, isOwner, isDM } = loadCharacter(num(req.params.id), req.user!.id);
+  if (!isOwner && !isDM) throw new HttpError(403, "Only the player and the DM can see this character's history");
+  const rows = all(
+    `SELECT cc.*, u.display_name AS submitter FROM character_changes cc JOIN users u ON u.id = cc.submitted_by
+     WHERE cc.character_id = ? AND cc.status != 'pending' ORDER BY cc.reviewed_at DESC, cc.id DESC LIMIT 60`,
+    c.id,
+  );
+  const rules = rulesOf(c.campaign_id);
+  res.json(rows.map((r) => {
+    const fix = r.ai_fix_applied ? parseJSON<any>(r.ai_fix, null) : null;
+    const proposed = normalizeCharacter(parseJSON(r.proposed, {}), rules);
+    const review = parseJSON<any>(r.ai_review, null);
+    return {
+      id: r.id,
+      kind: r.kind,
+      status: r.status,
+      submitter: r.submitter,
+      submittedAt: r.created_at,
+      reviewedAt: r.reviewed_at,
+      note: r.note,
+      dmComment: r.dm_comment,
+      aiCheck: review?.status === "done" ? { verdict: review.verdict, summary: review.summary } : null,
+      aiFix: fix?.status === "done"
+        ? {
+            summary: fix.summary,
+            reasons: (fix.changes ?? []).filter((x: any) => x.ok).map((x: any) => ({ field: x.field, reason: x.reason })),
+            changes: diffCharacter(proposed, normalizeCharacter(fix.data, rules)),
+          }
+        : null,
+    };
+  }));
+});
+
 // DM-only notes about a character
 characterRoutes.put("/characters/:id/dm-notes", (req, res) => {
   const { c, isDM } = loadCharacter(num(req.params.id), req.user!.id);
@@ -469,8 +504,11 @@ function loadChange(req: { params: Record<string, string>; user?: Row }) {
 
 characterRoutes.post("/changes/:changeId/approve", (req, res) => {
   const ch = loadChange(req);
-  // The DM may tweak the sheet before approving.
-  const data = req.body?.data ? cleanData(req.body.data, rulesOf(ch.campaign_id)) : normalizeCharacter(parseJSON(ch.proposed, {}));
+  // The DM may approve with the AI's suggested fixes, or tweak the sheet before approving.
+  const aiFix = parseJSON<any>(ch.ai_fix, null);
+  const useAiFix = !!req.body?.useAiFix && aiFix?.status === "done";
+  const data = useAiFix ? cleanData(aiFix.data, rulesOf(ch.campaign_id))
+    : req.body?.data ? cleanData(req.body.data, rulesOf(ch.campaign_id)) : normalizeCharacter(parseJSON(ch.proposed, {}));
   // Keep in-play values (HP, slots used...) that changed during play while the change was waiting.
   const live = one("SELECT data, status FROM characters WHERE id = ?", ch.character_id)!;
   if (live.status === "approved") {
@@ -483,7 +521,7 @@ characterRoutes.post("/changes/:changeId/approve", (req, res) => {
     data.inspiration = cur.inspiration;
   }
   run("UPDATE characters SET data = ?, name = ?, status = 'approved', updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, ch.character_id);
-  run("UPDATE character_changes SET status = 'approved', dm_comment = ?, reviewed_at = datetime('now') WHERE id = ?", String(req.body?.comment ?? "").slice(0, 2000), ch.id);
+  run("UPDATE character_changes SET status = 'approved', dm_comment = ?, ai_fix_applied = ?, reviewed_at = datetime('now') WHERE id = ?", String(req.body?.comment ?? "").slice(0, 2000), useAiFix ? 1 : 0, ch.id);
   notify(ch.campaign_id, "characters");
   notify(ch.campaign_id, "approvals");
   res.json({ ok: true });

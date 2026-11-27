@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { go, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
-import { classSummary, derive, diffCharacter } from "../../../shared/character";
+import { classSummary, derive, diffCharacter, fieldLabel } from "../../../shared/character";
 
 export function Approvals({ campaign, data, reload }: { campaign: Campaign; data: any[] | null; reload: () => void }) {
   if (!data) return <p className="muted">Loading...</p>;
@@ -108,18 +108,10 @@ function AiFixPanel({ a, busy, act }: { a: any; busy: boolean; act: (path: strin
       )}
       <p className="muted" style={{ fontSize: 12 }}>After fixes: AC {fixedDv.ac} · HP {fixedDv.maxHp} · {classSummary(fix.data)}</p>
       <div className="row">
-        {diffs.length > 0 && <button className="primary" disabled={busy} onClick={() => act("approve", { data: fix.data, comment: `Approved with AI fixes: ${fix.changes.filter((c: any) => c.ok).map((c: any) => c.reason).join(" ")}` })}>Approve with these fixes</button>}
+        {diffs.length > 0 && <button className="primary" disabled={busy} onClick={() => act("approve", { useAiFix: true, comment: "Approved with the AI's suggested fixes. See Change history on the sheet for what changed and why." })}>Approve with these fixes</button>}
         <button disabled={busy} onClick={() => act("ai-fix/discard")}>Discard fixes</button>
       </div>
     </div>
   );
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  "abilities.str": "Strength", "abilities.dex": "Dexterity", "abilities.con": "Constitution", "abilities.int": "Intelligence", "abilities.wis": "Wisdom", "abilities.cha": "Charisma",
-  "hp.max": "Max hit points", ac: "Armor class", saveProficiencies: "Saving throws", skillProficiencies: "Skills", skillExpertise: "Expertise",
-  proficienciesText: "Proficiencies & languages", initiativeBonus: "Initiative bonus",
-};
-function fieldLabel(f: string) {
-  return FIELD_LABELS[f] ?? f.charAt(0).toUpperCase() + f.slice(1);
-}

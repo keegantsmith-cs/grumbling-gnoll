@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, downloadFile } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import {
-  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, classInfo, classSummary, derive, fmtMod, mod, normalizeCharacter,
+  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, classInfo, classSummary, derive, fieldLabel, fmtMod, mod, normalizeCharacter,
   type Ability, type CharacterData, type ClassLevel, type RulesVersion,
 } from "../../../shared/character";
 import { ALIGNMENTS, EXTRA_CLASSES, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
@@ -193,6 +193,8 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
           </div>
         )}
       </fieldset>
+
+      {(c.ownerId === status.user?.id || c.isDM) && c.campaignId && <ChangeHistory id={id} />}
 
       <div className="card">
         <h3>More</h3>
@@ -439,5 +441,61 @@ function OwnerPicker({ c, name, members, users, onDone }: { c: any; name: string
       </select>
       {members.length + others.length <= 1 && <span className="muted" style={{ fontSize: 12 }}> (no players yet: create invite codes on the home page)</span>}
     </>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = { create: "New character", update: "Changes", import: "Brought in / imported" };
+
+/** Everything the DM and the AI did to this character, newest first. */
+function ChangeHistory({ id }: { id: number }) {
+  const { data } = useLoad<any[]>(`/characters/${id}/history`, [id]);
+  const [open, setOpen] = useState(false);
+  if (!data) return null;
+  const aiCount = data.filter((h) => h.aiFix).length;
+  // "abilities.dex: 17 → 15" reads better as "Dexterity: 17 → 15"
+  const pretty = (line: string) => {
+    const i = line.indexOf(":");
+    return i > 0 ? `${fieldLabel(line.slice(0, i))}${line.slice(i)}` : line;
+  };
+  return (
+    <div className="card">
+      <div className="row">
+        <h3 className="grow" style={{ margin: 0, cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 📜 Change history</h3>
+        <span className="muted" style={{ fontSize: 12 }}>{data.length} review{data.length === 1 ? "" : "s"}{aiCount ? ` · ${aiCount} AI adjustment${aiCount === 1 ? "" : "s"}` : ""}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {data.length === 0 && <p className="muted">Nothing reviewed yet.</p>}
+          {data.map((h) => (
+            <div key={h.id} style={{ borderLeft: `3px solid ${h.aiFix ? "var(--gold)" : h.status === "approved" ? "var(--green)" : "var(--red)"}`, padding: "4px 0 8px 12px", marginBottom: 10 }}>
+              <div className="row">
+                <b>{KIND_LABEL[h.kind] ?? h.kind}</b>
+                <span className={`pill ${h.status === "approved" ? "ok" : "bad"}`}>{h.status === "approved" ? "approved" : "sent back"}</span>
+                {h.aiFix && <span className="pill warn">✨ adjusted by AI</span>}
+                <span className="muted right" style={{ fontSize: 12 }}>{h.reviewedAt ?? h.submittedAt}</span>
+              </div>
+              {h.note && <div className="muted" style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>Submitted by {h.submitter}: {h.note}</div>}
+              {h.aiCheck && <div style={{ fontSize: 13 }}>🧙 AI check: {h.aiCheck.summary}</div>}
+              {h.aiFix && (
+                <div className="card" style={{ background: "var(--panel-2)", margin: "6px 0 0", padding: 10 }}>
+                  <b>What the AI changed and why</b>
+                  {h.aiFix.summary && <p style={{ margin: "4px 0" }}>{h.aiFix.summary}</p>}
+                  <ul style={{ margin: "4px 0" }}>
+                    {h.aiFix.reasons.map((r: any, i: number) => <li key={i}><b>{fieldLabel(r.field)}:</b> {r.reason}</li>)}
+                  </ul>
+                  {h.aiFix.changes.length > 0 && (
+                    <details>
+                      <summary style={{ fontSize: 13 }}>Exact before → after ({h.aiFix.changes.length})</summary>
+                      <ul>{h.aiFix.changes.map((c: string, i: number) => <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>{pretty(c)}</li>)}</ul>
+                    </details>
+                  )}
+                </div>
+              )}
+              {h.dmComment && <div style={{ fontSize: 13, marginTop: 4 }}>💬 DM: {h.dmComment}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

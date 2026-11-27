@@ -342,6 +342,12 @@ export function diffCharacter(before: CharacterData | null, after: CharacterData
       return;
     }
     const show = (v: unknown) => {
+      // Lists of spells, attacks, gear or classes read better as names
+      if (Array.isArray(v) && v.every((x) => x && typeof x === "object" && "name" in x)) {
+        return v.length ? v.map((x: any) => (x.level != null && "subclass" in x ? `${x.name} ${x.level}` : x.name) || "?").join(", ") : "(none)";
+      }
+      if (Array.isArray(v)) return v.length ? v.join(", ") : "(none)";
+      if (v === null) return "(auto)";
       const s = typeof v === "string" ? v : JSON.stringify(v);
       return s === undefined ? "(none)" : s.length > 120 ? s.slice(0, 117) + "..." : s;
     };
@@ -349,4 +355,17 @@ export function diffCharacter(before: CharacterData | null, after: CharacterData
   };
   walk(before, after, "");
   return out;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  "abilities.str": "Strength", "abilities.dex": "Dexterity", "abilities.con": "Constitution", "abilities.int": "Intelligence", "abilities.wis": "Wisdom", "abilities.cha": "Charisma",
+  "hp.max": "Max hit points", ac: "Armor class", saveProficiencies: "Saving throws", skillProficiencies: "Skills", skillExpertise: "Expertise",
+  proficienciesText: "Proficiencies & languages", initiativeBonus: "Initiative bonus", classes: "Classes", spells: "Spells", attacks: "Attacks",
+  inventory: "Equipment", features: "Features & traits", species: "Species / race", background: "Background", alignment: "Alignment", experience: "Experience",
+  speed: "Speed", name: "Name",
+};
+/** Friendly name for a sheet field path like "abilities.dex". */
+export function fieldLabel(f: string) {
+  const key = f.replace(/\.\d+.*$/, "").replace(/^(classes|spells|attacks|inventory)\..*$/, "$1");
+  return FIELD_LABELS[f] ?? FIELD_LABELS[key] ?? f.charAt(0).toUpperCase() + f.slice(1);
 }
