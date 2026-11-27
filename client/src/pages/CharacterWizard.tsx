@@ -402,7 +402,7 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
   );
 }
 
-function Review({ d }: { d: CharacterData }) {
+export function Review({ d, complete }: { d: CharacterData; complete?: boolean }) {
   const dv = derive(d);
   return (
     <div>
@@ -412,7 +412,7 @@ function Review({ d }: { d: CharacterData }) {
         {ABILITIES.map((a) => <span key={a} className="pill">{a.toUpperCase()} {d.abilities[a]} ({fmtMod(dv.mods[a])})</span>)}
       </div>
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="pill">HP {dv.maxHp}</span><span className="pill">AC {dv.ac} (no armor yet)</span><span className="pill">Speed {d.speed} ft</span>
+        <span className="pill">HP {dv.maxHp}</span><span className="pill">AC {dv.ac}{complete ? "" : " (no armor yet)"}</span><span className="pill">Speed {d.speed} ft</span>
         <span className="pill">Initiative {fmtMod(dv.initiative)}</span><span className="pill">Proficiency {fmtMod(dv.proficiencyBonus)}</span>
         {dv.spellSaveDC && <span className="pill">Spell DC {dv.spellSaveDC}</span>}
       </div>
@@ -420,7 +420,7 @@ function Review({ d }: { d: CharacterData }) {
       <p><b>Skills:</b> {d.skillProficiencies.map((k) => `${skillName(k)} ${fmtMod(dv.skills[k])}`).join(", ")}</p>
       {d.inventory.length > 0 && <p><b>Gear:</b> {d.inventory.map((i) => i.name).join(", ")}</p>}
       <p><b>Money:</b> {d.currency.gp} gp</p>
-      <p className="muted">After creating, open the sheet to add spells, attacks, features, armor class and a portrait.</p>
+      {!complete && <p className="muted">After creating, open the sheet to add spells, attacks, features, armor class and a portrait.</p>}
     </div>
   );
 }

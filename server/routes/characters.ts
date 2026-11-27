@@ -4,7 +4,7 @@ import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap, postChat } from "../realtime.ts";
 import { describeRoll, diceList, rollDice } from "../../shared/dice.ts";
-import { aiEnabled, characterArtPrompt, characterSuggestions, fixCharacter, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
+import { aiEnabled, characterArtPrompt, characterSuggestions, fixCharacter, generateCharacter, reviewCharacter, scanCharacterSheet, type ScannedSheet, type SheetFile } from "../ai.ts";
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
 import { characterSheetPdf } from "../sheetpdf.ts";
@@ -328,7 +328,22 @@ characterRoutes.post("/characters/scan", sheetUpload.array("files", 8), async (r
   const rules = rulesOf(campaignId);
   const s = await scanCharacterSheet({ campaignId, userId: uid, files, rulesVersion: rules });
 
-  const data = cleanData({
+  const data = sheetToCharacter(s, rules);
+
+  const note = `Imported from ${uploaded.length === 1 ? "a picture/PDF" : `${uploaded.length} pictures/PDFs`} of a character sheet.${s.readingProblems ? ` The AI wasn't sure about: ${s.readingProblems}` : ""}`;
+  const autoApprove = !campaignId || role === "dm";
+  const r = run("INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?,?)", uid, campaignId, data.name, JSON.stringify(data), autoApprove ? "approved" : "pending");
+  const id = Number(r.lastInsertRowid);
+  if (!autoApprove) {
+    const changeId = submitChange(id, uid, "import", data, note);
+    notify(campaignId!, "approvals");
+    void runReview(changeId, uid);
+  } else if (campaignId) notify(campaignId, "characters");
+  res.json({ id, readingProblems: s.readingProblems });
+});
+
+function sheetToCharacter(s: Omit<ScannedSheet, "readingProblems">, rules: RulesVersion): CharacterData {
+  return cleanData({
     name: s.name || "Imported Character",
     rulesVersion: rules,
     species: s.species,
@@ -353,18 +368,7 @@ characterRoutes.post("/characters/scan", sheetUpload.array("files", 8), async (r
     backstory: s.backstory,
     notes: s.notes,
   }, rules);
-
-  const note = `Imported from ${uploaded.length === 1 ? "a picture/PDF" : `${uploaded.length} pictures/PDFs`} of a character sheet.${s.readingProblems ? ` The AI wasn't sure about: ${s.readingProblems}` : ""}`;
-  const autoApprove = !campaignId || role === "dm";
-  const r = run("INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?,?)", uid, campaignId, data.name, JSON.stringify(data), autoApprove ? "approved" : "pending");
-  const id = Number(r.lastInsertRowid);
-  if (!autoApprove) {
-    const changeId = submitChange(id, uid, "import", data, note);
-    notify(campaignId!, "approvals");
-    void runReview(changeId, uid);
-  } else if (campaignId) notify(campaignId, "characters");
-  res.json({ id, readingProblems: s.readingProblems });
-});
+}
 
 /** Values typed into a fillable PDF sheet, as "field: value" lines. */
 async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
@@ -652,4 +656,34 @@ characterRoutes.post("/changes/:changeId/ai-review", (req, res) => {
   if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
   void runReview(ch.id, req.user!.id);
   res.json({ ok: true });
+});
+
+// AI character generator: returns a finished sheet to preview; nothing is saved until the player clicks Create.
+characterRoutes.post("/characters/ai-generate", async (req, res) => {
+  const uid = req.user!.id;
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null;
+  if (campaignId && !campaignRole(campaignId, uid)) throw new HttpError(404, "Campaign not found");
+  const rules = campaignId ? rulesOf(campaignId) : (req.body?.rulesVersion === "2024" ? "2024" : "2014");
+  const o = req.body?.options ?? {};
+  const str = (v: unknown, n = 80) => String(v ?? "").slice(0, n);
+  let rolledScores: number[] | undefined;
+  if (o.abilityMethod === "rolled") {
+    const roll = o.rollId ? one("SELECT * FROM character_rolls WHERE id = ? AND user_id = ? AND kind = 'abilities'", Number(o.rollId), uid) : null;
+    if (!roll) throw new HttpError(400, "Roll the ability scores first");
+    rolledScores = parseJSON<{ values: number[] }>(roll.result, { values: [] }).values;
+  }
+  const ctx = campaignId ? campaignContext(campaignId) : null;
+  // Strip the DM's secrets from the party summary: the player reads what comes back
+  const publicParty = ctx ? ctx.party.split("\n").filter((l) => l.startsWith("- ")).join("\n") : "";
+  const g = await generateCharacter({
+    campaign: ctx ? { ...ctx, dmNotes: "", adventure: undefined, party: publicParty } : null, campaignId, userId: uid, rulesVersion: rules,
+    req: {
+      name: str(o.name), species: str(o.species), className: str(o.className), subclass: str(o.subclass), background: str(o.background), alignment: str(o.alignment),
+      level: Math.max(1, Math.min(20, Math.round(Number(o.level) || 1))), abilityMethod: o.abilityMethod === "pointbuy" ? "pointbuy" : o.abilityMethod === "rolled" ? "rolled" : "standard",
+      rolledScores, concept: str(o.concept, 1500),
+    },
+  });
+  const data = sheetToCharacter(g, rules);
+  res.json({ data, summary: g.summary, dmCheckNotes: g.dm_check_notes });
 });

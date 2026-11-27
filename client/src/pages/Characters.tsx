@@ -6,6 +6,7 @@ import { CharacterPage } from "./CharacterSheet";
 import { StatusPill } from "./Home";
 import { ScanSheet } from "../components/ScanSheet";
 import { CharacterWizard } from "./CharacterWizard";
+import { AiCharacter } from "../components/AiCharacter";
 import { blankCharacter, classSummary, derive } from "../../../shared/character";
 
 export function CharactersTab({ campaign, changed, openId, roll }: { campaign: Campaign; changed: { what: string; at: number }; openId?: string; roll: (e: string, l: string) => void }) {
@@ -15,6 +16,7 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
   const [error, setError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [wizard, setWizard] = useState(false);
+  const [aiMaker, setAiMaker] = useState(false);
   useEffect(() => { if (changed.what === "characters" || changed.what === "approvals") list.reload(); }, [changed]);
 
   if (openId) return <CharacterPage id={Number(openId)} roll={roll} onDone={() => { list.reload(); go(`c/${campaign.id}/characters`); }} />;
@@ -46,8 +48,10 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
         <h1 className="grow">Characters</h1>
         <button onClick={() => setScanning(true)}>📷 Import paper sheet</button>
         <button onClick={create}>+ Blank sheet</button>
+        <button onClick={() => setAiMaker(true)}>✨ AI makes one</button>
         <button className="primary" onClick={() => setWizard(true)}>🧙 Create a character (step by step)</button>
       </div>
+      {aiMaker && <AiCharacter campaignId={campaign.id} rules={campaign.rulesVersion} onCancel={() => setAiMaker(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
       {wizard && <CharacterWizard campaignId={campaign.id} rules={campaign.rulesVersion} onCancel={() => setWizard(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
       {scanning && <ScanSheet campaignId={campaign.id} onCancel={() => setScanning(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
       {error && <div className="error">{error}</div>}

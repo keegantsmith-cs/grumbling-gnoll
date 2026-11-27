@@ -929,3 +929,71 @@ Base everything on what's really in the picture. Don't contradict the drawing.`;
     friendlyError(e);
   }
 }
+
+// ---------- AI character generator ----------
+
+const GeneratedCharacterSchema = SheetSchema.omit({ readingProblems: true }).extend({
+  summary: z.string(),
+  dm_check_notes: z.string(),
+});
+export type GeneratedCharacter = z.infer<typeof GeneratedCharacterSchema>;
+
+export interface CharacterRequest {
+  name?: string; species?: string; className?: string; subclass?: string; level: number; background?: string;
+  alignment?: string; abilityMethod: "standard" | "pointbuy" | "rolled"; rolledScores?: number[]; concept?: string;
+}
+
+export async function generateCharacter(opts: { campaign: CampaignContext | null; campaignId: number | null; userId: number; rulesVersion: string; req: CharacterRequest }): Promise<GeneratedCharacter> {
+  const anthropic = getClient();
+  const r = opts.req;
+  const chosen = (label: string, v?: string) => `${label}: ${v?.trim() ? v.trim() : "(you choose)"}`;
+  const abilities = r.abilityMethod === "rolled" && r.rolledScores?.length === 6
+    ? `Ability scores were ROLLED on the site: ${r.rolledScores.join(", ")}. Assign exactly these six numbers (one each) to the abilities that suit the build, then add racial/background increases.`
+    : r.abilityMethod === "pointbuy"
+      ? "Ability scores: 27-point buy (scores 8-15 before increases; costs 8=0,9=1,10=2,11=3,12=4,13=5,14=7,15=9). Then add racial/background increases."
+      : "Ability scores: the standard array 15, 14, 13, 12, 10, 8 (one each), then add racial/background increases.";
+  const prompt = `Create a complete, rules-legal D&D 5th Edition (${opts.rulesVersion} rules) player character at level ${r.level}.
+
+${chosen("Name", r.name)}
+${chosen(opts.rulesVersion === "2024" ? "Species" : "Race", r.species)}
+${chosen("Class", r.className)}
+${chosen("Subclass", r.subclass)}
+${chosen("Background", r.background)}
+${chosen("Alignment", r.alignment)}
+Player's idea: ${r.concept?.trim() || "(none: make something fun and playable)"}
+
+Rules to follow exactly:
+- ${abilities} ${opts.rulesVersion === "2024" ? "In the 2024 rules, the background gives +2/+1 or +1/+1/+1 to its three listed abilities." : "In the 2014 rules, use the race's ability increases."} Apply ability score improvements (or feats) at levels 4, 8, 12, 16, 19 as the class allows, and list any feats in features. No score above 20.
+- Saving throw proficiencies from the (first) class only. Skills: the background's two plus the right number from the class list, no duplicates; expertise only if the class grants it.
+- hpMax: max hit die + Con at level 1, then the class average (rounded up) + Con per level. Leave hpCurrent equal to hpMax.
+- armorClass from the starting armor and shield you list (or the class's unarmored defense); speed from the race/species.
+- Equipment: the class and background starting gear, sensible for the level (a level 5+ character may have one or two uncommon magic items). Put gold in currency.
+- attacks: each weapon or attack cantrip with the correct to-hit bonus ("+5") and damage ("1d8+3 slashing").
+- Spellcasters: the right number of cantrips and spells known/prepared for the class and level, only spells the class can actually take, levels within the available slots. Mark spells prepared.
+- features: the class, subclass, race/species and background features gained up to this level, one short line each (name: what it does).
+- proficienciesText: armor, weapons, tools, languages.
+- personality: traits, ideal, bond, flaw. backstory: 2 short paragraphs that fit the idea${opts.campaign ? " and could hook into the campaign" : ""}. Don't invent major plot secrets for the DM's world.
+- summary: one sentence describing the character for the player.
+- dm_check_notes: anything the DM should double-check (choices that depend on books outside the SRD, homebrew from the idea), or "".
+Use empty strings / empty lists for anything that doesn't apply.`;
+  try {
+    const stream = anthropic.beta.messages.stream({
+      ...callParams("assistant"),
+      max_tokens: 32000,
+      output_config: { effort: "medium", format: betaZodOutputFormat(GeneratedCharacterSchema) },
+      // Player-facing output: only the public campaign basics, never the DM's private notes
+      system: opts.campaign ? `${BASE_SYSTEM}\n\nCampaign: ${opts.campaign.name} (D&D 5e ${opts.rulesVersion} rules).\nThe party so far:\n${opts.campaign.party || "(nobody yet)"}` : BASE_SYSTEM,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const parsed = GeneratedCharacterSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) throw new AIError("The character came back in an unexpected format. Try again.");
+    logUsage(opts.campaignId, opts.userId, "character-generate", `${r.species ?? "?"} ${r.className ?? "?"} ${r.level}`, { name: parsed.data.name }, msg);
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new AIError("The character came back incomplete. Try again.");
+    friendlyError(e);
+  }
+}
