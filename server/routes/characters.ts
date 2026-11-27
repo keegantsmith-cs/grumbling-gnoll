@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { all, one, parseJSON, run, type Row } from "../db.ts";
 import { campaignRole, requireUser } from "../auth.ts";
-import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
+import { campaignAccess, HttpError, num, publicCampaignContext, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap, postChat } from "../realtime.ts";
 import { describeRoll, diceList, rollDice } from "../../shared/dice.ts";
 import { aiEnabled, characterArtPrompt, characterSuggestions, fixCharacter, generateCharacter, reviewCharacter, scanCharacterSheet, type ScannedSheet, type SheetFile } from "../ai.ts";
@@ -55,6 +55,8 @@ function loadCharacter(id: number, viewerId: number, needEdit = false) {
   const role = c.campaign_id ? campaignRole(c.campaign_id, viewerId) : undefined;
   const isOwner = c.owner_id === viewerId;
   if (!isOwner && !role) throw new HttpError(404, "Character not found");
+  // Characters still waiting for approval are only for their player and the DM
+  if (!isOwner && role !== "dm" && c.status !== "approved") throw new HttpError(404, "Character not found");
   if (needEdit && !isOwner && role !== "dm") throw new HttpError(403, "That's not your character");
   return { c, isOwner, isDM: role === "dm" };
 }
@@ -83,7 +85,8 @@ async function runReview(changeId: number, userId: number) {
         : ch.kind === "create"
           ? "This is a brand-new character submitted for approval."
           : "The player edited their character (for example, leveled up) and submitted the changes for approval.";
-    const review = await reviewCharacter({ campaign: campaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), previous, reason });
+    // The player reads this check on their sheet, so the AI gets no DM-only notes
+    const review = await reviewCharacter({ campaign: publicCampaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), previous, reason });
     run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "done", ...review }), changeId);
     const verdict = { looks_good: "✅ Looks good", minor_issues: "⚠️ Minor issues", needs_changes: "❌ Needs changes" }[review.verdict];
     discordAlertDM(ch.campaign_id, `🧙 AI check finished: ${proposed.name}`, `${verdict}: ${review.summary}`, `/#/c/${ch.campaign_id}/approvals`);
@@ -629,7 +632,7 @@ async function runFix(changeId: number, userId: number) {
     const proposed = normalizeCharacter(parseJSON(ch.proposed, {}), rules);
     const review = parseJSON<any>(ch.ai_review, {});
     const issues = (review.issues ?? []).map((i: any) => `- [${i.severity}] ${i.area}: ${i.problem} (suggestion: ${i.suggestion})`).join("\n");
-    const fix = await fixCharacter({ campaign: campaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), issues });
+    const fix = await fixCharacter({ campaign: publicCampaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), issues });
     // Apply each edit to a copy, skipping anything malformed
     const fixed: any = structuredClone(proposed);
     const applied = fix.changes.map((c) => {
@@ -673,11 +676,10 @@ characterRoutes.post("/characters/ai-generate", async (req, res) => {
     if (!roll) throw new HttpError(400, "Roll the ability scores first");
     rolledScores = parseJSON<{ values: number[] }>(roll.result, { values: [] }).values;
   }
-  const ctx = campaignId ? campaignContext(campaignId) : null;
-  // Strip the DM's secrets from the party summary: the player reads what comes back
-  const publicParty = ctx ? ctx.party.split("\n").filter((l) => l.startsWith("- ")).join("\n") : "";
+  // The player reads what comes back, so the AI only gets public campaign basics (no DM notes or secrets)
+  const ctx = campaignId ? publicCampaignContext(campaignId) : null;
   const g = await generateCharacter({
-    campaign: ctx ? { ...ctx, dmNotes: "", adventure: undefined, party: publicParty } : null, campaignId, userId: uid, rulesVersion: rules,
+    campaign: ctx, campaignId, userId: uid, rulesVersion: rules,
     req: {
       name: str(o.name), species: str(o.species), className: str(o.className), subclass: str(o.subclass), background: str(o.background), alignment: str(o.alignment),
       level: Math.max(1, Math.min(20, Math.round(Number(o.level) || 1))), abilityMethod: o.abilityMethod === "pointbuy" ? "pointbuy" : o.abilityMethod === "rolled" ? "rolled" : "standard",

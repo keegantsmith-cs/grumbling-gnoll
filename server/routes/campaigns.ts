@@ -2,7 +2,7 @@ import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, imageUpload } from "../helpers.ts";
-import { addMonsterTokens, averageHp, broadcastMap, monsterMeta, notify, sizeToCells } from "../realtime.ts";
+import { addMonsterTokens, averageHp, broadcastMap, dropFromCampaign, monsterMeta, notify, sizeToCells } from "../realtime.ts";
 import { srdMonster } from "./srd.ts";
 import { aiEnabled, condenseNotes, generateNpcs } from "../ai.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
@@ -102,6 +102,7 @@ campaignRoutes.delete("/campaigns/:id/members/:userId", (req, res) => {
   const uid = Number(req.params.userId);
   if (uid === campaign.dm_user_id) throw new HttpError(400, "The DM can't be removed");
   run("DELETE FROM campaign_members WHERE campaign_id = ? AND user_id = ?", id, uid);
+  dropFromCampaign(id, uid);
   notify(id, "campaign");
   res.json({ ok: true });
 });

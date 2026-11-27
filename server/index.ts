@@ -40,7 +40,17 @@ app.use("/api", authRoutes, campaignRoutes, characterRoutes, mapRoutes, compendi
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 
 // Uploaded maps and images. Only logged-in users can see them.
-app.use("/uploads", (req, res, next) => (req.user ? next() : res.status(401).end()), express.static(UPLOAD_DIR, { maxAge: "7d", index: false }));
+// Browsers must treat them as the picture/PDF they claim to be, never as a web page that could run scripts.
+app.use(
+  "/uploads",
+  (req, res, next) => (req.user ? next() : res.status(401).end()),
+  // Files uploaded before this fix kept their original extension, so only refuse types that could run code
+  (req, res, next) => (/^\/[\w.-]+$/.test(req.path) && !/\.(html?|xhtml|svgz?|xml|js|mjs|css)$/i.test(req.path) ? next() : res.status(404).end()),
+  express.static(UPLOAD_DIR, { maxAge: "7d", index: false, dotfiles: "deny", setHeaders: (res, file) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (!file.toLowerCase().endsWith(".pdf")) res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+  } }),
+);
 
 // The built website (npm run build) is served in production
 const dist = path.resolve("dist");

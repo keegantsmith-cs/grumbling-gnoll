@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
-import path from "node:path";
+import fs from "node:fs";
 import { all, one, parseJSON } from "./db.ts";
 import { UPLOAD_DIR } from "./db.ts";
 import { campaignRole } from "./auth.ts";
@@ -33,17 +33,31 @@ export function campaignAccessById(id: number, userId: number, needDM = false) {
   return { id, role, campaign, isDM: role === "dm" };
 }
 
+/**
+ * Campaign facts for AI prompts whose answer a PLAYER will read (rules checks, item details, character maker):
+ * no DM notes, no adventure, no DM-only character notes, no other players' private suggestions.
+ */
+export function publicCampaignContext(campaignId: number): CampaignContext {
+  const c = one("SELECT * FROM campaigns WHERE id = ?", campaignId)!;
+  return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: "", party: partySummary(campaignId, c.rules_version as RulesVersion, false), adventure: undefined };
+}
+
 export function campaignContext(campaignId: number): CampaignContext {
   const c = one("SELECT * FROM campaigns WHERE id = ?", campaignId)!;
+  return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: c.dm_notes, party: partySummary(campaignId, c.rules_version as RulesVersion, true), adventure: adventureContext(campaignId) };
+}
+
+function partySummary(campaignId: number, rules: RulesVersion, withSecrets: boolean): string {
   const chars = all(
     `SELECT c.id, c.data, u.display_name, n.notes AS dm_notes FROM characters c JOIN users u ON u.id = c.owner_id
      LEFT JOIN character_dm_notes n ON n.character_id = c.id WHERE c.campaign_id = ? AND c.status = 'approved'`,
     campaignId,
   );
-  const party = chars
+  return chars
     .map((row) => {
-      const d = normalizeCharacter(parseJSON(row.data, {}), c.rules_version as RulesVersion);
+      const d = normalizeCharacter(parseJSON(row.data, {}), rules);
       const dv = derive(d);
+      if (!withSecrets) return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}`;
       const secret = row.dm_notes?.trim() ? `\n  DM's secret notes about ${d.name} (never reveal these to players directly): ${row.dm_notes.trim().slice(0, 2000)}` : "";
       const story = d.backstory?.trim() ? `\n  Backstory: ${d.backstory.trim().slice(0, 600)}` : "";
       const sugg = all("SELECT author_kind, text FROM character_suggestions WHERE character_id = ? AND resolved = 0 ORDER BY id DESC LIMIT 3", row.id)
@@ -52,10 +66,12 @@ export function campaignContext(campaignId: number): CampaignContext {
       return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}${story}${secret}${suggLine}`;
     })
     .join("\n");
-  return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: c.dm_notes, party, adventure: adventureContext(campaignId) };
 }
 
-export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
+  // A refused request (not allowed, bad input...) mustn't leave its uploaded file behind on disk
+  const files = [req.file, ...(Array.isArray(req.files) ? req.files : Object.values(req.files ?? {}).flat())];
+  for (const f of files) if (f?.path) fs.unlink(f.path, () => {});
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
   if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
   if (err && typeof err === "object" && err.constructor?.name === "AIError") return res.status(502).json({ error: (err as Error).message });
@@ -63,9 +79,12 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   res.status(500).json({ error: "Something went wrong on the server" });
 }
 
+const SAFE_EXT: Record<string, string> = { "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "application/pdf": ".pdf" };
+
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
-  filename: (_req, file, cb) => cb(null, crypto.randomBytes(12).toString("hex") + path.extname(file.originalname).toLowerCase()),
+  // The file extension comes from the checked file type, never from the uploader's file name (so nobody can upload "page.html")
+  filename: (_req, file, cb) => cb(null, crypto.randomBytes(12).toString("hex") + (SAFE_EXT[file.mimetype] ?? ".bin")),
 });
 
 export const imageUpload = multer({

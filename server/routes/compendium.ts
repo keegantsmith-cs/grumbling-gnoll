@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import { PDFDocument } from "pdf-lib";
 import { all, one, parseJSON, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
-import { campaignAccess, campaignAccessById, campaignContext, HttpError, num, pdfUpload } from "../helpers.ts";
+import { campaignAccess, campaignAccessById, campaignContext, HttpError, num, pdfUpload, publicCampaignContext } from "../helpers.ts";
 import { notify } from "../realtime.ts";
 import { aiEnabled, convertPdfChunk, describeThing, EDITIONS, npcStatBlock } from "../ai.ts";
 import { discordAlertDM } from "../discord.ts";
@@ -28,14 +28,19 @@ const entryOut = (e: any) => ({
   createdAt: e.created_at,
 });
 
+/** What a viewer may see of an entry: NPC stat blocks and stat references stay with the DM. */
+function forViewer<T extends { kind: string; data: Record<string, any> }>(e: T, isDM: boolean): T {
+  if (isDM || e.kind !== "npc") return e;
+  const { statblock: _s, statReference: _r, ...data } = e.data;
+  return { ...e, data };
+}
+
 compendiumRoutes.get("/campaigns/:id/compendium", (req, res) => {
   const { id, isDM } = campaignAccess(req);
   const rows = isDM
     ? all("SELECT * FROM compendium WHERE campaign_id = ? ORDER BY status = 'approved', kind, name", id)
     : all("SELECT * FROM compendium WHERE campaign_id = ? AND ((status = 'approved' AND player_visible = 1) OR created_by = ?) ORDER BY kind, name", id, req.user!.id);
-  const out = rows.map(entryOut);
-  if (!isDM) for (const e of out) if (e.kind === "npc") { delete e.data.statblock; delete e.data.statReference; } // NPC stats stay secret
-  res.json(out);
+  res.json(rows.map((r) => forViewer(entryOut(r), isDM))); // NPC stats stay secret
 });
 
 compendiumRoutes.post("/campaigns/:id/compendium", (req, res) => {
@@ -94,7 +99,7 @@ compendiumRoutes.get("/campaigns/:id/compendium/lookup", (req, res) => {
   const exact = rows.find((e) => lookupName(e.name).join(" ") === words.join(" "));
   const close = rows.filter((e) => { const n = lookupName(e.name).join(" "); return words.every((w) => n.includes(w)); }).sort((a, b) => a.name.length - b.name.length)[0];
   const e = exact ?? close;
-  res.json(e ? entryOut(e) : null);
+  res.json(e ? forViewer(entryOut(e), isDM) : null);
 });
 
 /** Search the campaign's Compendium by words (for sheet suggestions and "similar entries"). */
@@ -108,7 +113,7 @@ function searchVisible(campaignId: number, userId: number, isDM: boolean, kinds:
     const hits = words.filter((w) => n.includes(w)).length;
     return { e, score: hits / words.length + (n.startsWith(words[0]) ? 0.2 : 0) };
   }).filter((x) => x.score > 0);
-  return scored.sort((a, b) => b.score - a.score || a.e.name.length - b.e.name.length).slice(0, limit).map((x) => ({ ...entryOut(x.e), match: x.score }));
+  return scored.sort((a, b) => b.score - a.score || a.e.name.length - b.e.name.length).slice(0, limit).map((x) => ({ ...forViewer(entryOut(x.e), isDM), match: x.score }));
 }
 
 compendiumRoutes.get("/campaigns/:id/compendium/search", (req, res) => {
@@ -150,7 +155,8 @@ compendiumRoutes.post("/campaigns/:id/compendium/ai-describe", async (req, res) 
   const { isDM } = campaignAccess(req);
   const related = searchVisible(id, req.user!.id, isDM, [kind], name, 3).filter((r) => r.match >= 0.5)
     .map((r) => `"${r.name}" (${r.source || "Compendium"}): ${JSON.stringify(r.data).slice(0, 2500)}`).join("\n\n");
-  res.json(await describeThing(campaignContext(id), req.user!.id, kind, name, String(req.body?.hint ?? "").slice(0, 500), related));
+  // Players read the answer, so they get the AI without the DM's private notes
+  res.json(await describeThing(isDM ? campaignContext(id) : publicCampaignContext(id), req.user!.id, kind, name, String(req.body?.hint ?? "").slice(0, 500), related));
 });
 
 // ---- duplicates ----
