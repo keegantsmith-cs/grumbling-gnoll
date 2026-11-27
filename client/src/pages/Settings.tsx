@@ -51,7 +51,10 @@ export function Settings({ campaign, reload }: { campaign: Campaign; reload: () 
           Private DM notes: your world, factions, NPCs the party has met, what happened last session. The AI assistant reads these so its suggestions fit your campaign. Players never see them.
           <textarea rows={12} value={f.dmNotes} onChange={(e) => setF({ ...f, dmNotes: e.target.value })} placeholder={"Setting: The Free City of Oakhaven, on the edge of the Mirewood.\nMain villain: Lady Vess, a vampire posing as a noble.\nSession 3: the party rescued the blacksmith's daughter and angered the Thieves' Guild..."} />
         </label>
-        <button className="primary" onClick={save}>Save</button>
+        <div className="row">
+          <button className="primary" onClick={save}>Save</button>
+          <NotesTools campaign={campaign} notes={f.dmNotes} onReplaced={(text) => { setF({ ...f, dmNotes: text }); reload(); }} />
+        </div>
       </div>
 
       <SessionCard campaign={campaign} reload={reload} />
@@ -190,5 +193,42 @@ function DiscordCard({ campaign, reload }: { campaign: Campaign; reload: () => v
         <button disabled={!dc.dmWebhook} onClick={() => test("dm")}>Send test DM alert</button>
       </div>
     </div>
+  );
+}
+
+/** Shows how big the notes are (they go with every AI request) and condenses them with AI. */
+function NotesTools({ campaign, notes, onReplaced }: { campaign: Campaign; notes: string; onReplaced: (text: string) => void }) {
+  const { status, toast } = useStatus();
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const tokens = Math.round(notes.length / 4);
+  const big = tokens > 6000;
+  async function condense() {
+    setBusy(true);
+    try { setPreview((await api.post(`/campaigns/${campaign.id}/notes/condense`)).text); }
+    catch (e) { toast((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <>
+      <span className="muted" style={{ fontSize: 12, color: big ? "#f0c674" : undefined }}>
+        About {tokens.toLocaleString()} tokens{big ? ". Long notes make every AI request cost more." : "."}
+      </span>
+      {status.aiEnabled && <button className="small" disabled={busy || notes.length < 800} onClick={condense} title="Rewrites the notes about a third as long, keeping names, secrets and house rules">{busy ? "Condensing..." : "✨ Condense my notes"}</button>}
+      {campaign.hasNotesBackup && <button className="small" onClick={async () => { if (!confirm("Put back the notes from before the last condense?")) return; await api.post(`/campaigns/${campaign.id}/notes/undo`); toast("Previous notes restored"); location.reload(); }}>Undo last condense</button>}
+      {preview !== null && (
+        <div style={{ position: "fixed", inset: 0, background: "#000c", zIndex: 150, display: "grid", placeItems: "center", padding: 16 }}>
+          <div className="card" style={{ maxWidth: 900, width: "100%", maxHeight: "92vh", overflow: "auto", marginBottom: 0 }}>
+            <h2>Condensed notes</h2>
+            <p className="muted">{notes.length.toLocaleString()} → {preview.length.toLocaleString()} characters. Check nothing important is missing, edit if you like, then use it. Your old notes are kept so you can undo.</p>
+            <textarea rows={22} value={preview} onChange={(e) => setPreview(e.target.value)} />
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="primary" onClick={async () => { await api.post(`/campaigns/${campaign.id}/notes/apply`, { text: preview }); toast("Notes condensed"); onReplaced(preview); setPreview(null); }}>Use these notes</button>
+              <button onClick={() => setPreview(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

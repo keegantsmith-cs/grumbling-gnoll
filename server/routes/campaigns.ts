@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
-import { campaignAccess, HttpError, imageUpload } from "../helpers.ts";
+import { campaignAccess, campaignContext, HttpError, imageUpload } from "../helpers.ts";
 import { addMonsterTokens, averageHp, broadcastMap, monsterMeta, notify, sizeToCells } from "../realtime.ts";
 import { srdMonster } from "./srd.ts";
+import { aiEnabled, condenseNotes } from "../ai.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
@@ -18,6 +19,7 @@ const out = (c: any, isDM: boolean) => ({
   dmName: c.dm_name,
   activeMapId: c.active_map_id,
   dmNotes: isDM ? c.dm_notes : undefined,
+  hasNotesBackup: isDM ? !!c.dm_notes_backup : undefined,
   nextSessionAt: c.next_session_at,
   sessionNote: c.session_note,
   sessionWeekly: !!c.session_weekly,
@@ -289,4 +291,27 @@ campaignRoutes.post("/campaigns/:id/encounters/place", (req, res) => {
     y += g * Math.max(1, size) + g * 0.5;
   }
   res.json({ added });
+});
+
+// ---------- condense campaign notes ----------
+campaignRoutes.post("/campaigns/:id/notes/condense", async (req, res) => {
+  const { id, campaign } = campaignAccess(req, true);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  if ((campaign.dm_notes ?? "").trim().length < 800) throw new HttpError(400, "Your notes are already short. Nothing to condense yet.");
+  res.json({ text: await condenseNotes(campaignContext(id), req.user!.id, campaign.dm_notes) });
+});
+campaignRoutes.post("/campaigns/:id/notes/apply", (req, res) => {
+  const { id, campaign } = campaignAccess(req, true);
+  const text = String(req.body?.text ?? "").slice(0, 200000);
+  if (!text.trim()) throw new HttpError(400, "Nothing to save");
+  run("UPDATE campaigns SET dm_notes_backup = ?, dm_notes = ? WHERE id = ?", campaign.dm_notes, text, id);
+  notify(id, "campaign");
+  res.json({ ok: true });
+});
+campaignRoutes.post("/campaigns/:id/notes/undo", (req, res) => {
+  const { id, campaign } = campaignAccess(req, true);
+  if (!campaign.dm_notes_backup) throw new HttpError(400, "There's nothing to undo");
+  run("UPDATE campaigns SET dm_notes = ?, dm_notes_backup = ? WHERE id = ?", campaign.dm_notes_backup, campaign.dm_notes, id);
+  notify(id, "campaign");
+  res.json({ ok: true });
 });

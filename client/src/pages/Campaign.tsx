@@ -16,7 +16,7 @@ import { VoiceButton } from "../components/VoiceButton";
 export interface Campaign {
   id: number; name: string; description: string; rulesVersion: "2014" | "2024"; dmUserId: number; dmName: string;
   activeMapId: number | null; dmNotes?: string; isDM: boolean;
-  nextSessionAt: string | null; sessionNote: string; sessionWeekly: boolean;
+  nextSessionAt: string | null; sessionNote: string; sessionWeekly: boolean; hasNotesBackup?: boolean;
   discord?: { webhook: string; dmWebhook: string; options: Record<string, boolean>; invite: string; serverId: string };
   discordVoice: { invite: string | null; widget: boolean };
   members: { id: number; username: string; displayName: string; role: string }[];

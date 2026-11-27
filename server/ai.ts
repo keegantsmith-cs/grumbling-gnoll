@@ -832,3 +832,39 @@ ${hint ? `The player/DM says: ${hint}\n` : ""}${related ? `\nSimilar entries alr
     friendlyError(e);
   }
 }
+
+// ---------- Condensing long campaign notes (they're sent with every AI request) ----------
+
+export async function condenseNotes(ctx: CampaignContext, userId: number, notes: string): Promise<string> {
+  const anthropic = getClient();
+  try {
+    const stream = anthropic.beta.messages.stream({
+      ...callParams("assistant"),
+      max_tokens: 16000,
+      output_config: { effort: "low" },
+      system: BASE_SYSTEM,
+      messages: [{
+        role: "user",
+        content: `These are a DM's private campaign notes for "${ctx.name}". They're sent to an AI assistant with every request, so they need to be shorter without losing anything important.
+
+Rewrite them in Markdown, aiming for about a third of the length:
+- ## World & setting: places, factions, gods, how things work. Keep names exact.
+- ## Important NPCs: one line each: name, who they are, attitude toward the party, secrets.
+- ## Story so far: older sessions condensed to a few sentences each; keep the most recent 2 sessions in more detail.
+- ## Open threads & promises: unresolved hooks, debts, prophecies, things the party said they'd do.
+- ## House rules & DM reminders: keep these word for word.
+Keep every proper noun and every secret. Drop repetition and filler. Don't invent anything.
+
+Notes:
+${notes}`,
+      }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
+    logUsage(ctx.id, userId, "condense-notes", `${notes.length} chars`, `${text.length} chars`, msg);
+    return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}

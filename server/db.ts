@@ -323,3 +323,4 @@ CREATE TABLE IF NOT EXISTS encounters (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+addColumn("campaigns", "dm_notes_backup", "TEXT NOT NULL DEFAULT ''");
