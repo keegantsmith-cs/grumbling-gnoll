@@ -4,7 +4,7 @@ import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap, postChat } from "../realtime.ts";
 import { describeRoll, diceList, rollDice } from "../../shared/dice.ts";
-import { aiEnabled, characterArtPrompt, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
+import { aiEnabled, characterArtPrompt, fixCharacter, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
 import { characterSheetPdf } from "../sheetpdf.ts";
@@ -71,7 +71,7 @@ function cleanData(raw: unknown, rules: RulesVersion): CharacterData {
 async function runReview(changeId: number, userId: number) {
   const ch = one("SELECT cc.*, c.campaign_id, c.data AS current FROM character_changes cc JOIN characters c ON c.id = cc.character_id WHERE cc.id = ?", changeId);
   if (!ch || !ch.campaign_id || !aiEnabled()) return;
-  run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "running" }), changeId);
+  run("UPDATE character_changes SET ai_review = ?, ai_fix = NULL WHERE id = ?", JSON.stringify({ status: "running" }), changeId);
   notify(ch.campaign_id, "approvals");
   try {
     const proposed = normalizeCharacter(parseJSON(ch.proposed, {}), rulesOf(ch.campaign_id));
@@ -451,6 +451,7 @@ characterRoutes.get("/campaigns/:id/approvals", (req, res) => {
         changes: diffCharacter(current, proposed),
         proposed,
         aiReview: parseJSON(r.ai_review, null),
+        aiFix: parseJSON(r.ai_fix, null),
       };
     }),
   );
@@ -492,6 +493,54 @@ characterRoutes.post("/changes/:changeId/reject", (req, res) => {
   notify(ch.campaign_id, "approvals");
   res.json({ ok: true });
 });
+
+// Ask the AI to prepare fixes for the problems its check found. Nothing changes until the DM approves.
+characterRoutes.post("/changes/:changeId/ai-fix", (req, res) => {
+  const ch = loadChange(req);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const review = parseJSON<any>(ch.ai_review, null);
+  if (review?.status !== "done" || !review.issues?.length) throw new HttpError(400, "Run the AI check first. It needs to find something to fix.");
+  void runFix(ch.id, req.user!.id);
+  res.json({ ok: true });
+});
+
+characterRoutes.post("/changes/:changeId/ai-fix/discard", (req, res) => {
+  const ch = loadChange(req);
+  run("UPDATE character_changes SET ai_fix = NULL WHERE id = ?", ch.id);
+  notify(ch.campaign_id, "approvals");
+  res.json({ ok: true });
+});
+
+async function runFix(changeId: number, userId: number) {
+  const ch = one("SELECT cc.*, c.campaign_id FROM character_changes cc JOIN characters c ON c.id = cc.character_id WHERE cc.id = ?", changeId)!;
+  run("UPDATE character_changes SET ai_fix = ? WHERE id = ?", JSON.stringify({ status: "running" }), changeId);
+  notify(ch.campaign_id, "approvals");
+  try {
+    const rules = rulesOf(ch.campaign_id);
+    const proposed = normalizeCharacter(parseJSON(ch.proposed, {}), rules);
+    const review = parseJSON<any>(ch.ai_review, {});
+    const issues = (review.issues ?? []).map((i: any) => `- [${i.severity}] ${i.area}: ${i.problem} (suggestion: ${i.suggestion})`).join("\n");
+    const fix = await fixCharacter({ campaign: campaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), issues });
+    // Apply each edit to a copy, skipping anything malformed
+    const fixed: any = structuredClone(proposed);
+    const applied = fix.changes.map((c) => {
+      try {
+        const value = JSON.parse(c.value_json);
+        const [a, b] = c.field.split(".");
+        if (b) fixed[a] = { ...(fixed[a] ?? {}), [b]: value };
+        else fixed[a] = value;
+        return { field: c.field, reason: c.reason, ok: true };
+      } catch {
+        return { field: c.field, reason: c.reason, ok: false };
+      }
+    });
+    const data = cleanData(fixed, rules);
+    run("UPDATE character_changes SET ai_fix = ? WHERE id = ?", JSON.stringify({ status: "done", summary: fix.summary, changes: applied, data }), changeId);
+  } catch (e) {
+    run("UPDATE character_changes SET ai_fix = ? WHERE id = ?", JSON.stringify({ status: "error", error: (e as Error).message }), changeId);
+  }
+  notify(ch.campaign_id, "approvals");
+}
 
 characterRoutes.post("/changes/:changeId/ai-review", (req, res) => {
   const ch = loadChange(req);

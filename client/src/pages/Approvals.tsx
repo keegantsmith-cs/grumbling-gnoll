@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { go, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
-import { classSummary, derive } from "../../../shared/character";
+import { classSummary, derive, diffCharacter } from "../../../shared/character";
 
 export function Approvals({ campaign, data, reload }: { campaign: Campaign; data: any[] | null; reload: () => void }) {
   if (!data) return <p className="muted">Loading...</p>;
@@ -39,7 +39,7 @@ function ApprovalCard({ a, campaign, reload }: { a: any; campaign: Campaign; rel
         <span className="pill warn">{KIND[a.kind] ?? a.kind}</span>
       </div>
       <p className="muted">From {a.submitter} · {a.createdAt} · Level {dv.level} {a.proposed.species} {classSummary(a.proposed)} · AC {dv.ac} · HP {dv.maxHp}</p>
-      {a.note && <p>“{a.note}”</p>}
+      {a.note && <p style={{ whiteSpace: "pre-wrap" }}>“{a.note}”</p>}
       <details open={a.changes.length <= 12}>
         <summary>{a.changes.length === 1 && a.changes[0] === "New character" ? "New character" : `${a.changes.length} change${a.changes.length === 1 ? "" : "s"}`}</summary>
         <ul>{a.changes.map((c: string, i: number) => <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>{c}</li>)}</ul>
@@ -66,8 +66,14 @@ function ApprovalCard({ a, campaign, reload }: { a: any; campaign: Campaign; rel
               </tbody></table>
             )}
             <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>The AI can be wrong. You make the final call.</p>
+            {review.issues.length > 0 && !a.aiFix && (
+              <button className="small" style={{ marginTop: 8 }} disabled={busy} onClick={() => act("ai-fix")}>✨ Let AI fix these</button>
+            )}
           </>
         )}
+        {a.aiFix?.status === "running" && <p className="muted">Preparing fixes...</p>}
+        {a.aiFix?.status === "error" && <div className="error">{a.aiFix.error} <button className="small" onClick={() => act("ai-fix")}>Try again</button></div>}
+        {a.aiFix?.status === "done" && <AiFixPanel a={a} busy={busy} act={act} />}
         {!review && status.aiEnabled && <p className="muted">Not checked yet.</p>}
       </div>
 
@@ -79,4 +85,41 @@ function ApprovalCard({ a, campaign, reload }: { a: any; campaign: Campaign; rel
       </div>
     </div>
   );
+}
+
+function AiFixPanel({ a, busy, act }: { a: any; busy: boolean; act: (path: string, body?: object) => Promise<void> }) {
+  const fix = a.aiFix;
+  const diffs = diffCharacter(a.proposed, fix.data);
+  const fixedDv = derive(fix.data);
+  return (
+    <div className="card" style={{ marginTop: 10, marginBottom: 0, border: "1px solid var(--gold)" }}>
+      <b>✨ Fixes the AI suggests</b>
+      <p style={{ margin: "4px 0" }}>{fix.summary}</p>
+      {fix.changes.length === 0 ? <p className="muted">The AI didn't think anything needed changing.</p> : (
+        <ul style={{ margin: "4px 0 8px" }}>
+          {fix.changes.map((c: any, i: number) => <li key={i}><b>{fieldLabel(c.field)}</b>: {c.reason}{!c.ok && <span className="pill bad" style={{ marginLeft: 6 }}>couldn't apply</span>}</li>)}
+        </ul>
+      )}
+      {diffs.length > 0 && (
+        <details>
+          <summary>Exactly what would change ({diffs.length})</summary>
+          <ul>{diffs.map((d, i) => <li key={i} style={{ fontFamily: "monospace", fontSize: 12 }}>{d}</li>)}</ul>
+        </details>
+      )}
+      <p className="muted" style={{ fontSize: 12 }}>After fixes: AC {fixedDv.ac} · HP {fixedDv.maxHp} · {classSummary(fix.data)}</p>
+      <div className="row">
+        {diffs.length > 0 && <button className="primary" disabled={busy} onClick={() => act("approve", { data: fix.data, comment: `Approved with AI fixes: ${fix.changes.filter((c: any) => c.ok).map((c: any) => c.reason).join(" ")}` })}>Approve with these fixes</button>}
+        <button disabled={busy} onClick={() => act("ai-fix/discard")}>Discard fixes</button>
+      </div>
+    </div>
+  );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  "abilities.str": "Strength", "abilities.dex": "Dexterity", "abilities.con": "Constitution", "abilities.int": "Intelligence", "abilities.wis": "Wisdom", "abilities.cha": "Charisma",
+  "hp.max": "Max hit points", ac: "Armor class", saveProficiencies: "Saving throws", skillProficiencies: "Skills", skillExpertise: "Expertise",
+  proficienciesText: "Proficiencies & languages", initiativeBonus: "Initiative bonus",
+};
+function fieldLabel(f: string) {
+  return FIELD_LABELS[f] ?? f.charAt(0).toUpperCase() + f.slice(1);
 }

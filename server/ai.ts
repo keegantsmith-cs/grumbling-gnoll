@@ -658,3 +658,58 @@ Make it fit who they are (a scholar shouldn't fight like a knight). Pick a chall
     friendlyError(e);
   }
 }
+
+// ---------- AI fixes for a character (the DM approves before anything is applied) ----------
+
+export const FIXABLE_FIELDS = [
+  "name", "species", "background", "alignment", "experience",
+  "abilities.str", "abilities.dex", "abilities.con", "abilities.int", "abilities.wis", "abilities.cha",
+  "classes", "saveProficiencies", "skillProficiencies", "skillExpertise",
+  "hp.max", "ac", "speed", "initiativeBonus",
+  "attacks", "spells", "inventory", "features", "proficienciesText",
+] as const;
+
+const FixSchema = z.object({
+  summary: z.string(),
+  changes: z.array(z.object({
+    field: z.enum(FIXABLE_FIELDS),
+    value_json: z.string(),
+    reason: z.string(),
+  })),
+});
+export type CharacterFix = z.infer<typeof FixSchema>;
+
+export async function fixCharacter(opts: { campaign: CampaignContext; userId: number; character: unknown; derived: unknown; issues: string }): Promise<CharacterFix> {
+  const anthropic = getClient();
+  const prompt = `This D&D 5th Edition (${opts.campaign.rulesVersion} rules) character was checked and these problems were found:
+${opts.issues}
+
+Propose the smallest set of edits that fixes the real rules problems. Rules:
+- Only change what's needed. Keep the player's choices (race, class, background, spells, gear) unless a choice is actually illegal; when something must change, pick the closest legal option.
+- Don't touch homebrew or content the DM added privately unless it's clearly a mistake (e.g. impossible math).
+- Each change sets ONE field from the allowed list to a new value. value_json is the complete new value as JSON, matching the shape in the character JSON below (e.g. "16" for a score, "null" to let the sheet calculate it, a full array for lists like spells, skillProficiencies or classes).
+- For "hp.max" or "ac", use null if the sheet's automatic calculation (shown in "derived") would be correct.
+- reason: one short sentence the DM can read.
+- If nothing needs changing, return an empty list.
+
+Character JSON:
+${JSON.stringify(opts.character, null, 1)}
+
+Derived (calculated) values:
+${JSON.stringify(opts.derived, null, 1)}`;
+  try {
+    const msg = await anthropic.beta.messages.parse({
+      ...callParams("review"),
+      max_tokens: 16000,
+      output_config: { effort: "medium", format: betaZodOutputFormat(FixSchema) },
+      system: campaignSystem(opts.campaign),
+      messages: [{ role: "user", content: prompt }],
+    });
+    checkStop(msg);
+    if (!msg.parsed_output) throw new AIError("The AI's fixes came back in an unexpected format. Try again.");
+    logUsage(opts.campaign.id, opts.userId, "character-fix", "fix", { changes: msg.parsed_output.changes.length }, msg);
+    return msg.parsed_output;
+  } catch (e) {
+    friendlyError(e);
+  }
+}

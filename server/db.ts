@@ -276,3 +276,4 @@ CREATE TABLE IF NOT EXISTS character_dm_notes (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+addColumn("character_changes", "ai_fix", "TEXT");
