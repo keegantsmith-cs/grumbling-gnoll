@@ -41,6 +41,8 @@ function characterOut(c: Row, viewerId: number) {
     lastReview: lastReview ?? null,
     canEdit: isOwner || isDM,
     isDM,
+    // Secret DM notes go only to this campaign's DM
+    dmNotes: isDM ? one("SELECT notes FROM character_dm_notes WHERE character_id = ?", c.id)?.notes ?? "" : undefined,
   };
 }
 
@@ -380,6 +382,15 @@ async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
     return undefined;
   }
 }
+
+// DM-only notes about a character
+characterRoutes.put("/characters/:id/dm-notes", (req, res) => {
+  const { c, isDM } = loadCharacter(num(req.params.id), req.user!.id);
+  if (!isDM) throw new HttpError(403, "Only the DM can see or edit these notes");
+  const notes = String(req.body?.notes ?? "").slice(0, 50000);
+  run("INSERT INTO character_dm_notes (character_id, notes, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(character_id) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at", c.id, notes);
+  res.json({ ok: true });
+});
 
 // Printable PDF of the character sheet (owner, DM, and the rest of the party can download it)
 characterRoutes.get("/characters/:id/pdf", async (req, res) => {

@@ -86,6 +86,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
       {!c.pending && c.lastReview?.status === "rejected" && <div className="error">The DM sent back your last changes{c.lastReview.dmComment ? `: "${c.lastReview.dmComment}"` : "."}</div>}
       {c.lastReview?.status === "approved" && c.lastReview.dmComment && !c.pending && <div className="notice">DM's note on your last approval: "{c.lastReview.dmComment}"</div>}
       {msg && <div className="notice">{msg}</div>}
+      {c.isDM && c.campaignId && <DmSecretNotes id={id} initial={c.dmNotes ?? ""} name={d.name} />}
 
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="card">
@@ -379,6 +380,38 @@ function InventoryEditor({ d, upd }: { d: CharacterData; upd: (p: Partial<Charac
       ))}
       {attuned > 3 && <div className="error">More than 3 attuned items. 5e allows 3.</div>}
       <button type="button" className="small" onClick={() => upd({ inventory: [...d.inventory, { name: "", qty: 1, weight: 0, equipped: false, attuned: false, notes: "" }] })}>+ Item</button>
+    </div>
+  );
+}
+
+/** Notes only the campaign's DM (and the DM's AI assistant) can see. */
+function DmSecretNotes({ id, initial, name }: { id: number; initial: string; name: string }) {
+  const { toast } = useStatus();
+  const [notes, setNotes] = useState(initial);
+  const [saved, setSaved] = useState(initial);
+  const [open, setOpen] = useState(!!initial);
+  useEffect(() => { setNotes(initial); setSaved(initial); }, [initial]);
+  const save = async () => {
+    if (notes === saved) return;
+    try { await api.put(`/characters/${id}/dm-notes`, { notes }); setSaved(notes); toast("DM notes saved"); }
+    catch (e) { toast((e as Error).message); }
+  };
+  return (
+    <div className="card" style={{ border: "1px dashed #8a6fb0", background: "#221a2a" }}>
+      <div className="row">
+        <b className="grow" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 🔒 DM-only notes</b>
+        <span className="muted" style={{ fontSize: 12 }}>Only you and your AI assistant see this. {name}'s player never does.</span>
+      </div>
+      {open && (
+        <>
+          <textarea rows={5} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={save} style={{ marginTop: 8 }}
+            placeholder={`Secrets and plans for ${name}: "Their missing sister is the cult leader." "Owes the thieves' guild 300 gp." "Cursed sword: reveal at level 5." Plot hooks, rulings, reminders...`} />
+          <div className="row">
+            <button className="small primary" disabled={notes === saved} onClick={save}>Save</button>
+            <span className="muted" style={{ fontSize: 12 }}>The AI assistant uses these when you ask for hooks, NPCs or encounters, but they never appear in PDFs, exports or anything players see.</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }

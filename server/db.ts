@@ -267,3 +267,12 @@ CREATE TABLE IF NOT EXISTS character_rolls (
 );
 `);
 addColumn("users", "dice_style", "TEXT NOT NULL DEFAULT 'ruby'");
+
+// DM-only notes about a character (secrets, plot hooks). Never sent to players.
+db.exec(`
+CREATE TABLE IF NOT EXISTS character_dm_notes (
+  character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+  notes TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
