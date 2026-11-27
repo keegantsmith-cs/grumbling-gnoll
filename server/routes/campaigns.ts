@@ -3,6 +3,7 @@ import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, HttpError, imageUpload } from "../helpers.ts";
 import { addMonsterTokens, averageHp, broadcastMap, monsterMeta, notify, sizeToCells } from "../realtime.ts";
+import { srdMonster } from "./srd.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
@@ -230,4 +231,62 @@ campaignRoutes.get("/campaigns/:id/discord/voice", async (req, res) => {
   } catch {
     res.json({ enabled: false, error: "Couldn't reach Discord right now.", channels: [], invite: campaign.discord_invite || null });
   }
+});
+
+// ---------- saved encounters ----------
+
+type EncMonster = { name: string; cr: string; count: number; entryId?: number; srdName?: string };
+const cleanMonsters = (list: unknown): EncMonster[] => (Array.isArray(list) ? list : []).slice(0, 30).map((m: any) => ({
+  name: String(m.name ?? "?").slice(0, 80), cr: String(m.cr ?? "0").slice(0, 8), count: Math.max(1, Math.min(20, Math.round(Number(m.count) || 1))),
+  entryId: m.entryId ? Number(m.entryId) : undefined, srdName: m.srdName ? String(m.srdName).slice(0, 80) : undefined,
+}));
+const encOut = (e: any) => ({ id: e.id, name: e.name, monsters: JSON.parse(e.monsters), notes: e.notes, createdAt: e.created_at });
+
+campaignRoutes.get("/campaigns/:id/encounters", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  res.json(all("SELECT * FROM encounters WHERE campaign_id = ? ORDER BY id DESC", id).map(encOut));
+});
+campaignRoutes.post("/campaigns/:id/encounters", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const r = run("INSERT INTO encounters (campaign_id, name, monsters, notes) VALUES (?,?,?,?)", id, String(req.body?.name || "Encounter").slice(0, 100), JSON.stringify(cleanMonsters(req.body?.monsters)), String(req.body?.notes ?? "").slice(0, 2000));
+  res.json({ id: Number(r.lastInsertRowid) });
+});
+campaignRoutes.put("/campaigns/:id/encounters/:eid", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  run("UPDATE encounters SET name = ?, monsters = ?, notes = ? WHERE id = ? AND campaign_id = ?", String(req.body?.name || "Encounter").slice(0, 100), JSON.stringify(cleanMonsters(req.body?.monsters)), String(req.body?.notes ?? "").slice(0, 2000), Number(req.params.eid), id);
+  res.json({ ok: true });
+});
+campaignRoutes.delete("/campaigns/:id/encounters/:eid", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  run("DELETE FROM encounters WHERE id = ? AND campaign_id = ?", Number(req.params.eid), id);
+  res.json({ ok: true });
+});
+
+/** Put a whole encounter on the map in one go (each monster group in its own row). */
+campaignRoutes.post("/campaigns/:id/encounters/place", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const b = req.body ?? {};
+  const monsters = cleanMonsters(b.monsters);
+  if (!monsters.length) throw new HttpError(400, "Add some monsters first");
+  const map = one("SELECT m.* FROM campaigns c JOIN maps m ON m.id = c.active_map_id WHERE c.id = ?", id);
+  if (!map) throw new HttpError(400, "Show a map on the table first (Maps tab → Show to players).");
+  const g = map.grid_size || 70;
+  let y = b.y != null ? Number(b.y) : map.height / 2 - ((monsters.length - 1) * g * 1.5) / 2;
+  let added = 0;
+  for (const em of monsters) {
+    let m: Record<string, any> | null = null;
+    if (em.entryId) {
+      const e = one("SELECT * FROM compendium WHERE id = ? AND campaign_id = ?", em.entryId, id);
+      if (e) { const d = JSON.parse(e.data); m = e.kind === "npc" ? { name: e.name, ...(d.statblock ?? {}) } : { ...d, name: d.name || e.name }; }
+    } else if (em.srdName) m = srdMonster(em.srdName) as Record<string, any> | null;
+    m ??= { name: em.name, hit_points: 10, size: "Medium", dex: 10 };
+    const size = sizeToCells(m.size);
+    added += addMonsterTokens(id, req.user!.id, {
+      name: em.name, count: em.count, hitPoints: Number(m.hit_points) || averageHp(m.hit_dice, 10), hitDice: m.hit_dice, rollHp: !!b.rollHp,
+      size, hidden: !!b.hidden, initiative: b.initiative ?? "each", dexMod: Math.floor(((Number(m.dex) || 10) - 10) / 2),
+      x: b.x != null ? Number(b.x) : undefined, y, meta: monsterMeta(m),
+    });
+    y += g * Math.max(1, size) + g * 0.5;
+  }
+  res.json({ added });
 });

@@ -75,3 +75,24 @@ test("maps: cave has open ground; AI layouts are clamped inside the grid", () =>
   const m = mapFromDesign(20, 20, 1, [{ label: "1", name: "Huge", x: -5, y: 50, w: 99, h: 99, shape: "rect" }], []);
   assert.equal(m.rooms[0].x >= 1 && m.rooms[0].x + m.rooms[0].w <= 19, true);
 });
+
+import { evaluateEncounter } from "../shared/encounter.ts";
+
+test("encounters: 2014 multiplier and thresholds", () => {
+  const r = evaluateEncounter("2014", [1, 1, 1, 1], [{ cr: "1/4", count: 4 }]);
+  assert.equal(r.totalXp, 200);
+  assert.equal(r.multiplier, 2);
+  assert.equal(r.adjustedXp, 400);
+  assert.equal(r.difficulty, "Deadly");
+  // small parties get a bigger multiplier, big parties a smaller one
+  assert.equal(evaluateEncounter("2014", [3, 3], [{ cr: "1", count: 1 }]).multiplier, 1.5);
+  assert.equal(evaluateEncounter("2014", [3, 3, 3, 3, 3, 3], [{ cr: "1", count: 2 }]).multiplier, 1);
+});
+
+test("encounters: 2024 budget", () => {
+  const r = evaluateEncounter("2024", [1, 1, 1, 1], [{ cr: "1/4", count: 4 }]);
+  assert.equal(r.adjustedXp, 200);
+  assert.equal(r.difficulty, "Low");
+  assert.equal(evaluateEncounter("2024", [5, 5, 5, 5], [{ cr: "5", count: 2 }]).difficulty, "High"); // 3600: over Moderate (3000), under High (4400)
+  assert.equal(evaluateEncounter("2024", [5, 5, 5, 5], [{ cr: "3", count: 4 }]).difficulty, "Moderate"); // 2800
+});

@@ -14,6 +14,11 @@ function srd() {
 const TYPES = { spell: "spells", equipment: "equipment", magic: "magicItems", monster: "monsters" } as const;
 type T = keyof typeof TYPES;
 
+/** A monster's SRD stat block by exact name (used when placing saved encounters). */
+export function srdMonster(name: string) {
+  return srd().monsters.find((m) => m.name.toLowerCase() === name.toLowerCase()) ?? null;
+}
+
 export const srdRoutes = Router();
 srdRoutes.use(requireUser);
 

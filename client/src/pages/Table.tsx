@@ -12,6 +12,7 @@ import { PartyPanel } from "../components/Party";
 import { Markdown } from "../components/Markdown";
 import { MonsterDrop } from "../components/MonsterDrop";
 import { RingEditor, RingsLayer } from "../components/Rings";
+import { EncounterBuilder } from "../components/EncounterBuilder";
 
 type Tool = "select" | "measure" | "ping" | "reveal" | "revealRect" | "hideRect";
 
@@ -68,6 +69,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
   const [measure, setMeasure] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
   const [draft, setDraft] = useState<FogShape | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [encounterAt, setEncounterAt] = useState<{ x: number; y: number } | null | undefined>(undefined); // undefined = closed
   const image = useHtmlImage(map.imageUrl);
   const generated = useMemo(() => (map.generated ? renderGenerated(map.generated, map.gridSize, isDM) : null), [map.generated, map.gridSize, isDM]);
 
@@ -150,6 +152,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           </>
         )}
         <button onClick={() => setShowAdd(!showAdd)}>{isDM ? "+ Token" : "+ My token"}</button>
+        {isDM && <button onClick={() => setEncounterAt(null)}>⚔️ Encounter</button>}
       </div>
       <div className="board-hint">{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
 
@@ -202,6 +205,13 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         </Layer>
       </Stage>
 
+      {encounterAt !== undefined && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 20, background: "#000a", overflow: "auto", padding: 16 }} onMouseDown={(e) => e.target === e.currentTarget && setEncounterAt(undefined)}>
+          <div style={{ maxWidth: 900, margin: "0 auto" }}>
+            <EncounterBuilder campaign={campaign} at={encounterAt ?? undefined} close={() => setEncounterAt(undefined)} />
+          </div>
+        </div>
+      )}
       {(sel || showAdd) && (
         <div className="token-panel card">
           {sel ? <TokenEditor t={sel} isDM={isDM} canEdit={canControl(sel)} live={live} close={() => setSelected(null)} campaign={campaign} map={map} />

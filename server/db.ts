@@ -312,3 +312,14 @@ addColumn("campaigns", "discord_invite", "TEXT NOT NULL DEFAULT ''");
 addColumn("campaigns", "discord_server_id", "TEXT NOT NULL DEFAULT ''");
 addColumn("tokens", "rings", "TEXT NOT NULL DEFAULT '[]'");
 addColumn("tokens", "meta", "TEXT NOT NULL DEFAULT '{}'");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS encounters (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  monsters TEXT NOT NULL DEFAULT '[]', -- [{name, cr, count, entryId?, srdName?}]
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
