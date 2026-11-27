@@ -27,7 +27,11 @@ function ApprovalCard({ a, campaign, reload }: { a: any; campaign: Campaign; rel
 
   async function act(path: string, body: object = {}) {
     setBusy(true);
-    try { await api.post(`/changes/${a.id}/${path}`, body); reload(); }
+    try {
+      await api.post(`/changes/${a.id}/${path}`, body);
+      if ((body as any).useAiFix) toast(`${a.characterName} approved with the AI's fixes. They're logged in the sheet's Change history.`);
+      reload();
+    }
     catch (e) { toast((e as Error).message); }
     finally { setBusy(false); }
   }
@@ -107,6 +111,7 @@ function AiFixPanel({ a, busy, act }: { a: any; busy: boolean; act: (path: strin
         </details>
       )}
       <p className="muted" style={{ fontSize: 12 }}>After fixes: AC {fixedDv.ac} · HP {fixedDv.maxHp} · {classSummary(fix.data)}</p>
+      <p className="muted" style={{ fontSize: 12 }}>If you approve with these fixes, the changes and reasons are saved in the character's Change history, where you and the player can look them up later.</p>
       <div className="row">
         {diffs.length > 0 && <button className="primary" disabled={busy} onClick={() => act("approve", { useAiFix: true, comment: "Approved with the AI's suggested fixes. See Change history on the sheet for what changed and why." })}>Approve with these fixes</button>}
         <button disabled={busy} onClick={() => act("ai-fix/discard")}>Discard fixes</button>
