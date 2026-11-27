@@ -4,6 +4,7 @@ import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, num } from "../helpers.ts";
 import { notify, broadcastMap } from "../realtime.ts";
 import { aiEnabled, reviewCharacter } from "../ai.ts";
+import { discordAlertDM } from "../discord.ts";
 import { derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
 
 export const characterRoutes = Router();
@@ -79,6 +80,8 @@ async function runReview(changeId: number, userId: number) {
           : "The player edited their character (for example, leveled up) and submitted the changes for approval.";
     const review = await reviewCharacter({ campaign: campaignContext(ch.campaign_id), userId, character: proposed, derived: derive(proposed), previous, reason });
     run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "done", ...review }), changeId);
+    const verdict = { looks_good: "✅ Looks good", minor_issues: "⚠️ Minor issues", needs_changes: "❌ Needs changes" }[review.verdict];
+    discordAlertDM(ch.campaign_id, `🧙 AI check finished: ${proposed.name}`, `${verdict}: ${review.summary}`, `/#/c/${ch.campaign_id}/approvals`);
   } catch (e) {
     run("UPDATE character_changes SET ai_review = ? WHERE id = ?", JSON.stringify({ status: "error", error: (e as Error).message }), changeId);
   }
@@ -86,6 +89,11 @@ async function runReview(changeId: number, userId: number) {
 }
 
 function submitChange(characterId: number, userId: number, kind: "create" | "update" | "import", data: CharacterData, note: string) {
+  const info = one("SELECT c.campaign_id, u.display_name FROM characters c, users u WHERE c.id = ? AND u.id = ?", characterId, userId);
+  if (info?.campaign_id && campaignRole(info.campaign_id, userId) !== "dm") {
+    const what = { create: "submitted a new character", update: "submitted changes to", import: "brought in a character from another campaign:" }[kind];
+    discordAlertDM(info.campaign_id, "📝 Waiting for your approval", `**${info.display_name}** ${what} **${data.name}**${note ? `\n> ${note}` : ""}`, `/#/c/${info.campaign_id}/approvals`);
+  }
   // One pending change per character: a new submission replaces the old one.
   run("DELETE FROM character_changes WHERE character_id = ? AND status = 'pending'", characterId);
   const r = run(

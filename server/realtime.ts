@@ -4,6 +4,7 @@ import { Server, type Socket } from "socket.io";
 import { all, one, parseJSON, run, type Row } from "./db.ts";
 import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, rollDice } from "../shared/dice.ts";
+import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
 
 let io: Server;
 
@@ -111,6 +112,7 @@ export function postChat(campaignId: number, userId: number | null, kind: string
   const r = run("INSERT INTO chat (campaign_id, user_id, kind, body, whisper_to) VALUES (?,?,?,?,?)", campaignId, userId, kind, JSON.stringify(body), whisperTo);
   const row = one("SELECT c.*, u.display_name AS name FROM chat c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?", r.lastInsertRowid)!;
   const msg = chatOut(row);
+  discordChat(campaignId, msg.name, kind, body, whisperTo != null);
   if (!io) return msg;
   eachSocket(campaignId, (s, d) => {
     if (canSee(msg, d.user.id, !!d.isDM)) s.emit("chat", msg);
@@ -372,12 +374,16 @@ export function initRealtime(server: HttpServer) {
       } else if (p.op === "next") {
         if (state.entries.length) {
           state.turn++;
-          if (state.turn >= state.entries.length) { state.turn = 0; state.round++; }
+          let newRound = false;
+          if (state.turn >= state.entries.length) { state.turn = 0; state.round++; newRound = true; }
+          const cur = state.entries[state.turn];
+          discordTurn(d.campaignId, state.round, cur.hidden ? null : cur.name, newRound);
         }
       } else if (p.op === "prev") {
         if (state.turn > 0) state.turn--;
         else if (state.round > 1) { state.round--; state.turn = Math.max(0, state.entries.length - 1); }
       } else if (p.op === "clear") {
+        if (state.entries.length) discordCombatEnd(d.campaignId);
         state.entries = []; state.turn = 0; state.round = 1;
       }
       run("UPDATE campaigns SET initiative = ? WHERE id = ?", JSON.stringify(state), d.campaignId);

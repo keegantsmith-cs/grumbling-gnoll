@@ -14,6 +14,7 @@ export function Settings({ campaign, reload }: { campaign: Campaign; reload: () 
         <h1>{campaign.name}</h1>
         <p>{campaign.description || "No description yet."}</p>
         <p className="muted">DM: {campaign.dmName} · 5e {campaign.rulesVersion} rules</p>
+        {campaign.nextSessionAt && <div className="notice">📅 Next session: <b>{fmtSession(campaign.nextSessionAt)}</b>{campaign.sessionWeekly ? " (every week)" : ""}{campaign.sessionNote ? ` · ${campaign.sessionNote}` : ""}</div>}
         <h3>Players</h3>
         <ul>{campaign.members.map((m) => <li key={m.id}>{m.displayName}{m.role === "dm" ? " (DM)" : ""}</li>)}</ul>
         <h3>Chat commands</h3>
@@ -50,6 +51,9 @@ export function Settings({ campaign, reload }: { campaign: Campaign; reload: () 
         <button className="primary" onClick={save}>Save</button>
       </div>
 
+      <SessionCard campaign={campaign} reload={reload} />
+      <DiscordCard campaign={campaign} reload={reload} />
+
       <div className="card">
         <h2>Players</h2>
         <table className="list"><tbody>
@@ -78,6 +82,97 @@ export function Settings({ campaign, reload }: { campaign: Campaign; reload: () 
             go("");
           }}>Delete campaign</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function fmtSession(iso: string) {
+  return new Date(iso).toLocaleString([], { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// datetime-local wants "YYYY-MM-DDTHH:MM" in the viewer's own time zone
+function toLocalInput(iso: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function SessionCard({ campaign, reload }: { campaign: Campaign; reload: () => void }) {
+  const { toast } = useStatus();
+  const [at, setAt] = useState(toLocalInput(campaign.nextSessionAt));
+  const [note, setNote] = useState(campaign.sessionNote);
+  const [weekly, setWeekly] = useState(campaign.sessionWeekly);
+  const save = async (clear = false) => {
+    try {
+      await api.post(`/campaigns/${campaign.id}/session`, clear ? { at: null } : { at: at ? new Date(at).toISOString() : null, note, weekly });
+      if (clear) { setAt(""); setNote(""); setWeekly(false); }
+      toast(clear ? "Next session cleared" : campaign.discord?.webhook ? "Saved and announced in Discord" : "Saved");
+      reload();
+    } catch (e) { toast((e as Error).message); }
+  };
+  return (
+    <div className="card">
+      <h2>📅 Next session</h2>
+      <p className="muted">Players see this on the site. If Discord is connected below, it's announced there, with reminders the day before, an hour before, and when it starts. Discord shows the time in each player's own time zone.</p>
+      <div className="row top">
+        <label>Date and time (your time)<input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} /></label>
+        <label className="grow">Note (optional)<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="We pick up in the Sunken Temple. Bring snacks!" /></label>
+      </div>
+      <label className="inline"><input type="checkbox" checked={weekly} onChange={(e) => setWeekly(e.target.checked)} /> Same time every week</label>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="primary" disabled={!at} onClick={() => save()}>Save{campaign.discord?.webhook ? " & announce" : ""}</button>
+        {campaign.nextSessionAt && <button onClick={() => save(true)}>Clear</button>}
+      </div>
+    </div>
+  );
+}
+
+function DiscordCard({ campaign, reload }: { campaign: Campaign; reload: () => void }) {
+  const { toast } = useStatus();
+  const dc = campaign.discord ?? { webhook: "", dmWebhook: "", options: {} };
+  const [webhook, setWebhook] = useState(dc.webhook);
+  const [dmWebhook, setDmWebhook] = useState(dc.dmWebhook);
+  const [opts, setOpts] = useState({ rolls: true, initiative: true, shares: true, maps: true, chat: false, ...dc.options });
+  const [help, setHelp] = useState(!dc.webhook);
+  const save = async () => {
+    try { await api.patch(`/campaigns/${campaign.id}`, { discord: { webhook, dmWebhook, options: opts } }); toast("Discord settings saved"); reload(); }
+    catch (e) { toast((e as Error).message); }
+  };
+  const test = (which: string) => api.post(`/campaigns/${campaign.id}/discord/test`, { which }).then(() => toast("Test message sent. Check Discord!")).catch((e) => toast(e.message));
+  const opt = (k: keyof typeof opts, label: string) => (
+    <label className="inline"><input type="checkbox" checked={opts[k]} onChange={(e) => setOpts({ ...opts, [k]: e.target.checked })} /> {label}</label>
+  );
+  return (
+    <div className="card">
+      <div className="row"><h2 className="grow">💬 Discord</h2><button className="small" onClick={() => setHelp(!help)}>{help ? "Hide" : "Show"} setup steps</button></div>
+      {help && (
+        <div className="notice">
+          <b>One-time setup in Discord (about 5 minutes):</b>
+          <ol style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+            <li>Make a server for your group if you don't have one: click the <b>+</b> at the bottom of the server list on the left, then <b>Create My Own</b> → <b>For me and my friends</b>.</li>
+            <li>Make a text channel for the game, like <b>#the-table</b>: click <b>+</b> next to "Text Channels".</li>
+            <li>Hover over that channel and click the ⚙️ gear → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b> → <b>Copy Webhook URL</b>. Paste it in the first box below.</li>
+            <li>For private DM alerts, make a second channel like <b>#dm-alerts</b>. While creating it, turn on <b>Private Channel</b> and don't add anyone, so only you can see it. Make a webhook for it the same way and paste it in the second box.</li>
+            <li>Click <b>Save</b>, then <b>Send test</b>.</li>
+          </ol>
+          <p style={{ margin: "6px 0 0" }}>Keep these links private. Anyone who has one can post in that channel.</p>
+        </div>
+      )}
+      <label>Game channel webhook (rolls, turns, shared handouts, session reminders)
+        <input value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." type="password" autoComplete="off" />
+      </label>
+      <div className="row" style={{ marginBottom: 10 }}>
+        {opt("rolls", "Dice rolls")}{opt("initiative", "Whose turn it is")}{opt("shares", "Things I share")}{opt("maps", "New maps")}{opt("chat", "All chat messages")}
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>Secret rolls and whispers never go to Discord. Hidden monsters' turns show as "The DM's creatures are acting".</p>
+      <label>DM alerts webhook (private: approvals waiting, AI checks done, conversions done)
+        <input value={dmWebhook} onChange={(e) => setDmWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." type="password" autoComplete="off" />
+      </label>
+      <div className="row">
+        <button className="primary" onClick={save}>Save</button>
+        <button disabled={!dc.webhook} onClick={() => test("table")}>Send test to game channel</button>
+        <button disabled={!dc.dmWebhook} onClick={() => test("dm")}>Send test DM alert</button>
       </div>
     </div>
   );

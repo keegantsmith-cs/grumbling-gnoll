@@ -179,3 +179,19 @@ export function parseJSON<T>(s: string | null | undefined, fallback: T): T {
     return fallback;
   }
 }
+
+// ---- schema upgrades for databases created by earlier versions ----
+function addColumn(table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+addColumn("uploads", "next_page", "INTEGER");
+// Discord
+addColumn("campaigns", "discord_webhook", "TEXT NOT NULL DEFAULT ''");
+addColumn("campaigns", "discord_dm_webhook", "TEXT NOT NULL DEFAULT ''");
+addColumn("campaigns", "discord_options", `TEXT NOT NULL DEFAULT '{"rolls":true,"initiative":true,"shares":true,"maps":true,"chat":false}'`);
+// Sessions
+addColumn("campaigns", "next_session_at", "TEXT"); // ISO time in UTC
+addColumn("campaigns", "session_note", "TEXT NOT NULL DEFAULT ''");
+addColumn("campaigns", "session_weekly", "INTEGER NOT NULL DEFAULT 0");
+addColumn("campaigns", "reminders_sent", "TEXT NOT NULL DEFAULT '[]'");

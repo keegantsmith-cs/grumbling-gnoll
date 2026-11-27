@@ -17,6 +17,7 @@ const { UPLOAD_DIR } = await import("./db.ts");
 const { attachUser } = await import("./auth.ts");
 const { errorHandler } = await import("./helpers.ts");
 const { initRealtime } = await import("./realtime.ts");
+const { startDiscordScheduler } = await import("./discord.ts");
 const { authRoutes } = await import("./routes/auth.ts");
 const { campaignRoutes } = await import("./routes/campaigns.ts");
 const { characterRoutes } = await import("./routes/characters.ts");
@@ -29,6 +30,8 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(attachUser);
+const { rememberOrigin } = await import("./discord.ts");
+app.use((req, _res, next) => { if (req.user) rememberOrigin(`${req.protocol}://${req.get("host")}`); next(); });
 
 app.use("/api", authRoutes, campaignRoutes, characterRoutes, mapRoutes, compendiumRoutes, aiRoutes);
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
@@ -47,5 +50,6 @@ app.use(errorHandler);
 
 const server = http.createServer(app);
 initRealtime(server);
+startDiscordScheduler();
 const port = Number(process.env.PORT) || 3000;
 server.listen(port, () => console.log(`The Grumbling Gnoll is open on http://localhost:${port}`));

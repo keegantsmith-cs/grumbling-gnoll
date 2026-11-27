@@ -6,6 +6,7 @@ import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignAccessById, HttpError, num, pdfUpload } from "../helpers.ts";
 import { notify } from "../realtime.ts";
 import { aiEnabled, convertPdfChunk, EDITIONS } from "../ai.ts";
+import { discordAlertDM } from "../discord.ts";
 
 export const compendiumRoutes = Router();
 compendiumRoutes.use(requireUser);
@@ -178,9 +179,12 @@ export async function processQueue() {
       try {
         await convertUpload(u);
         run("UPDATE uploads SET status = 'done', progress = 'Finished' WHERE id = ?", u.id);
+        const n = one("SELECT COUNT(*) AS n FROM compendium WHERE upload_id = ?", u.id)!.n;
+        discordAlertDM(u.campaign_id, "🔄 Conversion finished", `**${u.filename}** (pages ${u.page_from}-${u.page_to}): ${n} monsters and items are ready for review.`, `/#/c/${u.campaign_id}/compendium`);
       } catch (e) {
         console.error("conversion failed", e);
         run("UPDATE uploads SET status = 'error', error = ? WHERE id = ?", (e as Error).message, u.id);
+        discordAlertDM(u.campaign_id, "⚠️ Conversion stopped", `**${u.filename}**: ${(e as Error).message}\nYou can retry it and it picks up where it left off.`, `/#/c/${u.campaign_id}/convert`);
       }
       notify(u.campaign_id, "conversions");
       notify(u.campaign_id, "compendium");

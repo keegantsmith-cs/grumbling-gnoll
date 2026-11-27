@@ -13,6 +13,8 @@ import { Settings } from "./Settings";
 export interface Campaign {
   id: number; name: string; description: string; rulesVersion: "2014" | "2024"; dmUserId: number; dmName: string;
   activeMapId: number | null; dmNotes?: string; isDM: boolean;
+  nextSessionAt: string | null; sessionNote: string; sessionWeekly: boolean;
+  discord?: { webhook: string; dmWebhook: string; options: Record<string, boolean> };
   members: { id: number; username: string; displayName: string; role: string }[];
 }
 

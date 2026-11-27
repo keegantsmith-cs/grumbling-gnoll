@@ -3,6 +3,7 @@ import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, HttpError, imageUpload } from "../helpers.ts";
 import { broadcastMap, notify } from "../realtime.ts";
+import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
 campaignRoutes.use(requireUser);
@@ -16,6 +17,10 @@ const out = (c: any, isDM: boolean) => ({
   dmName: c.dm_name,
   activeMapId: c.active_map_id,
   dmNotes: isDM ? c.dm_notes : undefined,
+  nextSessionAt: c.next_session_at,
+  sessionNote: c.session_note,
+  sessionWeekly: !!c.session_weekly,
+  discord: isDM ? { webhook: c.discord_webhook, dmWebhook: c.discord_dm_webhook, options: JSON.parse(c.discord_options || "{}") } : undefined,
   isDM,
 });
 
@@ -56,6 +61,13 @@ campaignRoutes.patch("/campaigns/:id", (req, res) => {
   if (typeof b.description === "string") run("UPDATE campaigns SET description = ? WHERE id = ?", b.description.slice(0, 2000), id);
   if (b.rulesVersion === "2014" || b.rulesVersion === "2024") run("UPDATE campaigns SET rules_version = ? WHERE id = ?", b.rulesVersion, id);
   if (typeof b.dmNotes === "string") run("UPDATE campaigns SET dm_notes = ? WHERE id = ?", b.dmNotes.slice(0, 200000), id);
+  if (b.discord) {
+    const wh = String(b.discord.webhook ?? "").trim(), dmWh = String(b.discord.dmWebhook ?? "").trim();
+    if (!validWebhook(wh) || !validWebhook(dmWh)) throw new HttpError(400, "That doesn't look like a Discord webhook link. It should start with https://discord.com/api/webhooks/");
+    const o = b.discord.options ?? {};
+    const opts = { rolls: !!o.rolls, initiative: !!o.initiative, shares: !!o.shares, maps: !!o.maps, chat: !!o.chat };
+    run("UPDATE campaigns SET discord_webhook = ?, discord_dm_webhook = ?, discord_options = ? WHERE id = ?", wh, dmWh, JSON.stringify(opts), id);
+  }
   notify(id, "campaign");
   res.json({ ok: true });
 });
@@ -98,6 +110,7 @@ campaignRoutes.post("/campaigns/:id/active-map", (req, res) => {
   if (mapId && !one("SELECT id FROM maps WHERE id = ? AND campaign_id = ?", mapId, id)) throw new HttpError(404, "Map not found");
   run("UPDATE campaigns SET active_map_id = ? WHERE id = ?", mapId, id);
   broadcastMap(id);
+  if (mapId) discordMap(id, one("SELECT name FROM maps WHERE id = ?", mapId)!.name);
   res.json({ ok: true });
 });
 
@@ -112,4 +125,44 @@ campaignRoutes.get("/campaigns/:id/chat/export", (req, res) => {
       return `[${r.created_at}] ${r.name ?? "System"}: ${what}`;
     });
   res.type("text/plain").send(lines.join("\n"));
+});
+
+// ---- next session ----
+campaignRoutes.post("/campaigns/:id/session", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const b = req.body ?? {};
+  let at: string | null = null;
+  if (b.at) {
+    const t = new Date(String(b.at));
+    if (!Number.isFinite(t.getTime())) throw new HttpError(400, "That date doesn't look right");
+    at = t.toISOString();
+  }
+  run(
+    "UPDATE campaigns SET next_session_at = ?, session_note = ?, session_weekly = ?, reminders_sent = '[]' WHERE id = ?",
+    at,
+    String(b.note ?? "").slice(0, 500),
+    b.weekly ? 1 : 0,
+    id,
+  );
+  if (at && b.announce !== false) discordSessionAnnounce(id);
+  notify(id, "campaign");
+  res.json({ ok: true });
+});
+
+// ---- test the Discord links ----
+campaignRoutes.post("/campaigns/:id/discord/test", async (req, res) => {
+  const { id, campaign } = campaignAccess(req, true);
+  const which = req.body?.which === "dm" ? "dm" : "table";
+  const url = which === "dm" ? campaign.discord_dm_webhook : campaign.discord_webhook;
+  if (!url) throw new HttpError(400, "Save a webhook link first");
+  try {
+    if (which === "dm") {
+      discordAlertDM(id, "🔔 DM alerts are working", "You'll get messages here when characters need approval, AI checks finish, and PDF conversions are done.");
+    } else {
+      await sendWebhook(url, { content: `🍺 **The Grumbling Gnoll** is connected to this channel for **${campaign.name}**! Dice rolls, turns and session reminders will show up here.` });
+    }
+  } catch (e) {
+    throw new HttpError(400, `Discord didn't accept the message: ${(e as Error).message}`);
+  }
+  res.json({ ok: true });
 });

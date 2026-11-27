@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import { classSummary, totalLevel } from "../../../shared/character";
+import { fmtSession } from "./Settings";
 
 export function Home() {
   const { status } = useStatus();
@@ -53,6 +54,7 @@ export function Home() {
               <span className="pill">{c.rulesVersion} rules</span>
               <span className="pill">{c.isDM ? "You're the DM" : `DM: ${c.dmName}`}</span>
             </div>
+            {c.nextSessionAt && new Date(c.nextSessionAt) > new Date(Date.now() - 3 * 3600e3) && <p style={{ margin: "8px 0 0" }}>📅 Next session: <b>{fmtSession(c.nextSessionAt)}</b></p>}
           </div>
         ))}
         {campaigns.data?.length === 0 && <p className="muted">You're not in any campaigns yet. Create one, or ask your DM to add you.</p>}

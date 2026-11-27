@@ -49,6 +49,12 @@ if [ ! -f "$APP_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
   echo "    Created $APP_DIR/.env (add your Anthropic API key there later)"
 fi
+# Let Discord messages link back to the site
+if grep -q '^PUBLIC_URL=' "$APP_DIR/.env"; then
+  sed -i "s#^PUBLIC_URL=.*#PUBLIC_URL=https://$DOMAIN#" "$APP_DIR/.env"
+else
+  echo "PUBLIC_URL=https://$DOMAIN" >> "$APP_DIR/.env"
+fi
 chown -R gnoll:gnoll "$APP_DIR"
 
 echo "==> Installing and building (takes a minute)"
