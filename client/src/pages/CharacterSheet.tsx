@@ -103,14 +103,15 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
           }} />
         </div>
 
+        {roll && <p className="muted roll-hint">🎲 Click any gold number to roll it at the table.</p>}
         <div className="sheet">
           {/* Abilities */}
-          <div>
+          <div className="abilities">
             {ABILITIES.map((a) => (
               <div key={a} className="ability">
-                <div className="muted" style={{ fontSize: 11 }}>{ABILITY_NAMES[a].toUpperCase()}</div>
-                <div className="modv" title="Click to roll a check" onClick={() => rollD20(dv.mods[a], `${ABILITY_NAMES[a]} check`)}>{fmtMod(mod(d.abilities[a]))}</div>
-                <input type="number" value={d.abilities[a]} onChange={(e) => upd({ abilities: { ...d.abilities, [a]: Number(e.target.value) } })} />
+                <div className="muted" style={{ fontSize: 12 }}>{ABILITY_NAMES[a].toUpperCase()}</div>
+                <div className="modv" {...rollable(`${ABILITY_NAMES[a]} check`, () => rollD20(dv.mods[a], `${ABILITY_NAMES[a]} check`))}>{fmtMod(mod(d.abilities[a]))}</div>
+                <input type="number" aria-label={`${ABILITY_NAMES[a]} score`} value={d.abilities[a]} onChange={(e) => upd({ abilities: { ...d.abilities, [a]: Number(e.target.value) } })} />
               </div>
             ))}
           </div>
@@ -142,8 +143,8 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
               </div>
               <div className="row">
                 <span className="muted">Death saves</span>
-                <Pips n={3} filled={d.deathSaves.successes} color="#6aa05a" onSet={(v) => play({ deathSaves: { ...d.deathSaves, successes: v } }, { deathSaves: { ...d.deathSaves, successes: v } })} />
-                <Pips n={3} filled={d.deathSaves.failures} color="#b5432c" onSet={(v) => play({ deathSaves: { ...d.deathSaves, failures: v } }, { deathSaves: { ...d.deathSaves, failures: v } })} />
+                <span className="pip-group">Successes <Pips label="Death save successes" n={3} filled={d.deathSaves.successes} color="#6aa05a" onSet={(v) => play({ deathSaves: { ...d.deathSaves, successes: v } }, { deathSaves: { ...d.deathSaves, successes: v } })} /></span>
+                <span className="pip-group">Failures <Pips label="Death save failures" n={3} filled={d.deathSaves.failures} color="#b5432c" onSet={(v) => play({ deathSaves: { ...d.deathSaves, failures: v } }, { deathSaves: { ...d.deathSaves, failures: v } })} /></span>
                 <label className="inline right"><input type="checkbox" checked={d.inspiration} onChange={(e) => play({ inspiration: e.target.checked }, { inspiration: e.target.checked })} /> Inspiration</label>
               </div>
               <p className="muted" style={{ fontSize: 12, margin: 0 }}>Current HP, temp HP, death saves, inspiration and spell slots save right away without DM approval.</p>
@@ -152,19 +153,20 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
               <h3>Saving throws</h3>
               {ABILITIES.map((a) => (
                 <div key={a} className="skill-row">
-                  <input type="checkbox" checked={d.saveProficiencies.includes(a)} onChange={(e) => upd({ saveProficiencies: toggle(d.saveProficiencies, a, e.target.checked) })} />
-                  <span className="val" onClick={() => rollD20(dv.saves[a], `${ABILITY_NAMES[a]} save`)}>{fmtMod(dv.saves[a])}</span>
+                  <input type="checkbox" aria-label={`Proficient in ${ABILITY_NAMES[a]} saves`} title="Proficient" checked={d.saveProficiencies.includes(a)} onChange={(e) => upd({ saveProficiencies: toggle(d.saveProficiencies, a, e.target.checked) })} />
+                  <span className="val" {...rollable(`${ABILITY_NAMES[a]} save`, () => rollD20(dv.saves[a], `${ABILITY_NAMES[a]} save`))}>{fmtMod(dv.saves[a])}</span>
                   <span>{ABILITY_NAMES[a]}</span>
                 </div>
               ))}
             </div>
             <div className="card">
-              <h3>Skills <span className="muted" style={{ fontSize: 11 }}>☐ proficient · ☆ expertise</span></h3>
+              <h3>Skills</h3>
+              <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>First box: proficient · second box (gold): expertise</p>
               {SKILLS.map((s) => (
                 <div key={s.key} className="skill-row">
-                  <input type="checkbox" checked={d.skillProficiencies.includes(s.key)} onChange={(e) => upd({ skillProficiencies: toggle(d.skillProficiencies, s.key, e.target.checked) })} />
-                  <input type="checkbox" title="Expertise" checked={d.skillExpertise.includes(s.key)} onChange={(e) => upd({ skillExpertise: toggle(d.skillExpertise, s.key, e.target.checked) })} style={{ accentColor: "#e3b866" }} />
-                  <span className="val" onClick={() => rollD20(dv.skills[s.key], s.name)}>{fmtMod(dv.skills[s.key])}</span>
+                  <input type="checkbox" aria-label={`Proficient in ${s.name}`} title="Proficient" checked={d.skillProficiencies.includes(s.key)} onChange={(e) => upd({ skillProficiencies: toggle(d.skillProficiencies, s.key, e.target.checked) })} />
+                  <input type="checkbox" title="Expertise" aria-label={`Expertise in ${s.name}`} checked={d.skillExpertise.includes(s.key)} onChange={(e) => upd({ skillExpertise: toggle(d.skillExpertise, s.key, e.target.checked) })} style={{ accentColor: "#e3b866" }} />
+                  <span className="val" {...rollable(s.name, () => rollD20(dv.skills[s.key], s.name))}>{fmtMod(dv.skills[s.key])}</span>
                   <span>{s.name} <span className="muted">({s.ability})</span></span>
                 </div>
               ))}
@@ -188,12 +190,11 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
         </div>
 
         {canEdit && (
-          <div className="card" style={{ position: "sticky", bottom: 0, zIndex: 3 }}>
-            <div className="row">
-              {needsApproval && <input className="grow" placeholder="Note for the DM (e.g. 'Level 5: took Fireball')" value={note} onChange={(e) => setNote(e.target.value)} />}
-              <button className="primary" onClick={save} disabled={!dirty && !note}>{needsApproval ? "Submit to DM for approval" : "Save"}</button>
-              {dirty && <span className="muted">Unsaved changes</span>}
-            </div>
+          <div className={`card save-bar${dirty || note ? " sticky" : ""}`}>
+            {dirty && <span style={{ color: "var(--gold)", fontWeight: 600 }}>● Unsaved changes</span>}
+            {needsApproval && <input className="grow" aria-label="Note for the DM" placeholder="Note for the DM (e.g. 'Level 5: took Fireball')" value={note} onChange={(e) => setNote(e.target.value)} style={{ minWidth: 200 }} />}
+            {!dirty && !note && !needsApproval && <span className="muted grow">Change anything above, then save.</span>}
+            <button className="primary" style={{ marginLeft: "auto" }} onClick={save} disabled={!dirty && !note}>{needsApproval ? "Submit to DM for approval" : "Save"}</button>
           </div>
         )}
       </fieldset>
@@ -230,15 +231,24 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
 
 const toggle = <T,>(arr: T[], v: T, on: boolean) => (on ? [...new Set([...arr, v])] : arr.filter((x) => x !== v));
 
+/** Makes a number clickable *and* reachable with Tab + Enter. (Not a <button>, so it keeps working on sheets you can't edit.) */
+const rollable = (label: string, onRoll: () => void) => ({
+  role: "button" as const, tabIndex: 0, title: `Roll ${label}`, "aria-label": `Roll ${label}`,
+  onClick: onRoll,
+  onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRoll(); } },
+});
+
 function StatBox({ k, v, onClick }: { k: string; v: React.ReactNode; onClick?: () => void }) {
-  return <div className="stat-box" onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} title={onClick ? "Click to roll" : undefined}><div className="v">{v}</div><div className="k">{k}</div></div>;
+  return <div className="stat-box" style={onClick ? { cursor: "pointer" } : undefined} {...(onClick ? rollable(k, onClick) : {})}><div className="v">{v}</div><div className="k">{k}</div></div>;
 }
 
-function Pips({ n, filled, color, onSet }: { n: number; filled: number; color: string; onSet: (v: number) => void }) {
+function Pips({ n, filled, color, onSet, label }: { n: number; filled: number; color: string; onSet: (v: number) => void; label: string }) {
   return (
-    <span className="slots">
+    <span className="slots" role="group" aria-label={`${label}: ${filled} of ${n}`}>
       {Array.from({ length: n }, (_, i) => (
-        <span key={i} className="slot" style={{ borderColor: color, background: i < filled ? color : undefined }} onClick={() => onSet(i < filled ? i : i + 1)} />
+        <button type="button" key={i} className="slot" style={{ borderColor: color, background: i < filled ? color : undefined }}
+          aria-label={`${label} ${i + 1}`} aria-pressed={i < filled} title={`${i < filled ? "Used" : "Not used"} (click to change)`}
+          onClick={() => onSet(i < filled ? i : i + 1)} />
       ))}
     </span>
   );
@@ -321,11 +331,11 @@ function AttacksEditor({ d, dv, upd, roll }: { d: CharacterData; dv: ReturnType<
       {d.attacks.map((a, i) => (
         <div key={i} className="row" style={{ marginBottom: 4 }}>
           <SrdInput className="grow" value={a.name} placeholder="Longsword, Fire Bolt..." types={["equipment", "spell"]} onChange={(v) => set(i, "name", v)} onPick={(e) => fromSrd(i, e)} />
-          <input value={a.bonus} placeholder="+5" style={{ width: 54 }} onChange={(e) => set(i, "bonus", e.target.value)} />
-          <input value={a.damage} placeholder="1d8+3 slashing" style={{ width: 130 }} onChange={(e) => set(i, "damage", e.target.value)} />
-          <button type="button" className="small" onClick={() => roll(`1d20${a.bonus && !a.bonus.startsWith("-") && !a.bonus.startsWith("+") ? "+" : ""}${a.bonus || "+0"}`, `${d.name}: ${a.name} attack`)}>🎲</button>
-          <button type="button" className="small" onClick={() => roll(a.damage.split(" ")[0] || "1d4", `${d.name}: ${a.name} damage`)}>💥</button>
-          <button type="button" className="small danger" onClick={() => upd({ attacks: d.attacks.filter((_, j) => j !== i) })}>✕</button>
+          <input value={a.bonus} placeholder="+5" aria-label="Attack bonus" title="Attack bonus" style={{ width: 54 }} onChange={(e) => set(i, "bonus", e.target.value)} />
+          <input value={a.damage} placeholder="1d8+3 slashing" aria-label="Damage" title="Damage" style={{ width: 140 }} onChange={(e) => set(i, "damage", e.target.value)} />
+          <button type="button" className="small" onClick={() => roll(`1d20${a.bonus && !a.bonus.startsWith("-") && !a.bonus.startsWith("+") ? "+" : ""}${a.bonus || "+0"}`, `${d.name}: ${a.name} attack`)} title="Roll to hit" aria-label={`Roll ${a.name || "attack"} to hit`}>🎲</button>
+          <button type="button" className="small" onClick={() => roll(a.damage.split(" ")[0] || "1d4", `${d.name}: ${a.name} damage`)} title="Roll damage" aria-label={`Roll ${a.name || "attack"} damage`}>💥</button>
+          <button type="button" className="small danger" title="Remove attack" aria-label={`Remove ${a.name || "attack"}`} onClick={() => upd({ attacks: d.attacks.filter((_, j) => j !== i) })}>✕</button>
           {a.notes && <div className="muted" style={{ width: "100%", fontSize: 11, marginTop: -2 }}>{a.notes}</div>}
         </div>
       ))}
@@ -352,25 +362,25 @@ function SpellsEditor({ d, dv, upd, play }: { d: CharacterData; dv: ReturnType<t
       {dv.spellAbility && <p className="muted">Spell save DC <b>{dv.spellSaveDC}</b> · Spell attack <b>{fmtMod(dv.spellAttack ?? 0)}</b> · {ABILITY_NAMES[dv.spellAbility as Ability]}</p>}
       {dv.spellSlots.map((n, lvl) => n > 0 && (
         <div key={lvl} className="row" style={{ marginBottom: 2 }}>
-          <span style={{ width: 70 }}>Level {lvl + 1}</span>
-          <Pips n={n} filled={d.spellSlotsUsed[lvl] ?? 0} color="#e3b866" onSet={(v) => useSlot(lvl, v)} />
+          <span style={{ width: 90 }}>Level {lvl + 1}</span>
+          <Pips label={`Level ${lvl + 1} slots used`} n={n} filled={d.spellSlotsUsed[lvl] ?? 0} color="#e3b866" onSet={(v) => useSlot(lvl, v)} />
         </div>
       ))}
       {dv.pact.count > 0 && (
-        <div className="row"><span style={{ width: 70 }}>Pact (lvl {dv.pact.level})</span>
-          <Pips n={dv.pact.count} filled={d.pactSlotsUsed} color="#a77ad6" onSet={(v) => play({ pactSlotsUsed: v }, { pactSlotsUsed: v })} />
+        <div className="row"><span style={{ width: 90 }}>Pact (lvl {dv.pact.level})</span>
+          <Pips label="Pact slots used" n={dv.pact.count} filled={d.pactSlotsUsed} color="#a77ad6" onSet={(v) => play({ pactSlotsUsed: v }, { pactSlotsUsed: v })} />
         </div>
       )}
       {hasSlots && <button type="button" className="small" style={{ margin: "4px 0 8px" }} onClick={() => play({ spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0], pactSlotsUsed: 0 }, { spellSlotsUsed: [0, 0, 0, 0, 0, 0, 0, 0, 0], pactSlotsUsed: 0 })}>Long rest (reset slots)</button>}
       {d.spells.map((s, i) => (
         <div key={i} className="row" style={{ marginBottom: 4 }}>
-          <input type="checkbox" title="Prepared" checked={s.prepared} onChange={(e) => setSpell(i, { prepared: e.target.checked })} />
-          <select value={s.level} onChange={(e) => setSpell(i, { level: Number(e.target.value) })} style={{ width: 70 }}>
+          <input type="checkbox" title="Prepared" aria-label={`${s.name || "Spell"} prepared`} checked={s.prepared} onChange={(e) => setSpell(i, { prepared: e.target.checked })} />
+          <select value={s.level} aria-label="Spell level" onChange={(e) => setSpell(i, { level: Number(e.target.value) })} style={{ width: 84 }}>
             {Array.from({ length: 10 }, (_, l) => <option key={l} value={l}>{l === 0 ? "Cantrip" : `Lvl ${l}`}</option>)}
           </select>
           <SrdInput className="grow" value={s.name} placeholder="Spell name" types={["spell"]} onChange={(v) => setSpell(i, { name: v })} onPick={(e) => setSpell(i, { name: e.name, level: e.level, notes: spellSummary(e) })} />
           <SrdInfo type="spell" name={s.name} />
-          <button type="button" className="small danger" onClick={() => upd({ spells: d.spells.filter((_, j) => j !== i) })}>✕</button>
+          <button type="button" className="small danger" title="Remove spell" aria-label={`Remove ${s.name || "spell"}`} onClick={() => upd({ spells: d.spells.filter((_, j) => j !== i) })}>✕</button>
         </div>
       ))}
       <button type="button" className="small" onClick={() => upd({ spells: [...d.spells, { name: "", level: 1, prepared: true, notes: "" }] })}>+ Spell</button>
@@ -406,12 +416,12 @@ function InventoryEditor({ d, dv, upd }: { d: CharacterData; dv: ReturnType<type
       </div>
       {d.inventory.map((it, i) => (
         <div key={i} className="row" style={{ marginBottom: 4 }}>
-          <input type="number" value={it.qty} style={{ width: 52 }} onChange={(e) => set(i, { qty: Number(e.target.value) })} />
+          <input type="number" value={it.qty} aria-label="Quantity" title="Quantity" style={{ width: 52 }} onChange={(e) => set(i, { qty: Number(e.target.value) })} />
           <SrdInput className="grow" value={it.name} placeholder="Item" types={["equipment", "magic"]} onChange={(v) => set(i, { name: v })} onPick={(e) => pickItem(i, e)} />
           <SrdInfo type="equipment" name={it.name} />
-          <label className="inline" title="Equipped"><input type="checkbox" checked={it.equipped} onChange={(e) => set(i, { equipped: e.target.checked })} />E</label>
-          <label className="inline" title="Attuned"><input type="checkbox" checked={it.attuned} onChange={(e) => set(i, { attuned: e.target.checked })} />A</label>
-          <button type="button" className="small danger" onClick={() => upd({ inventory: d.inventory.filter((_, j) => j !== i) })}>✕</button>
+          <label className="inline" title="Equipped" style={{ marginRight: 4 }}><input type="checkbox" checked={it.equipped} onChange={(e) => set(i, { equipped: e.target.checked })} />Worn</label>
+          <label className="inline" title="Attuned" style={{ marginRight: 4 }}><input type="checkbox" checked={it.attuned} onChange={(e) => set(i, { attuned: e.target.checked })} />Attuned</label>
+          <button type="button" className="small danger" title="Remove item" aria-label={`Remove ${it.name || "item"}`} onClick={() => upd({ inventory: d.inventory.filter((_, j) => j !== i) })}>✕</button>
         </div>
       ))}
       {attuned > 3 && <div className="error">More than 3 attuned items. 5e allows 3.</div>}
@@ -435,7 +445,7 @@ function DmSecretNotes({ id, initial, name }: { id: number; initial: string; nam
   return (
     <div className="card" style={{ border: "1px dashed #8a6fb0", background: "#221a2a" }}>
       <div className="row">
-        <b className="grow" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 🔒 DM-only notes</b>
+        <button type="button" className="link grow" style={{ textDecoration: "none", color: "var(--text)", fontWeight: 700, textAlign: "left" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 🔒 DM-only notes</button>
         <span className="muted" style={{ fontSize: 12 }}>Only you and your AI assistant see this. {name}'s player never does.</span>
       </div>
       {open && (
@@ -500,7 +510,7 @@ function ChangeHistory({ id }: { id: number }) {
   return (
     <div className="card">
       <div className="row">
-        <h3 className="grow" style={{ margin: 0, cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 📜 Change history</h3>
+        <h3 className="grow" style={{ margin: 0 }}><button type="button" className="link" style={{ textDecoration: "none", font: "inherit", color: "inherit" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 📜 Change history</button></h3>
         <span className="muted" style={{ fontSize: 12 }}>{data.length} review{data.length === 1 ? "" : "s"}{aiCount ? ` · ${aiCount} AI adjustment${aiCount === 1 ? "" : "s"}` : ""}</span>
       </div>
       {open && (
@@ -563,7 +573,7 @@ function Suggestions({ id, name, isDM, isOwner }: { id: number; name: string; is
   return (
     <div className="card" style={{ border: "1px dashed #4f8a6a", background: "#18241d" }}>
       <div className="row">
-        <b className="grow" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 💡 Suggestions {openCount > 0 && <span className="badge">{openCount}</span>}</b>
+        <button type="button" className="link grow" style={{ textDecoration: "none", color: "var(--text)", fontWeight: 700, textAlign: "left" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 💡 Suggestions {openCount > 0 && <span className="badge">{openCount}</span>}</button>
         <span className="muted" style={{ fontSize: 12 }}>Private: only {isOwner ? "you" : `${name}'s player`}, the DM and the AI assistant see this.</span>
       </div>
       {open && (

@@ -25,7 +25,7 @@ export function VoiceButton({ campaign }: { campaign: Campaign }) {
   }, []);
 
   if (!configured) {
-    return campaign.isDM ? <a className="muted" style={{ marginLeft: "auto", alignSelf: "center", fontSize: 12, whiteSpace: "nowrap" }} href={`#/c/${campaign.id}/settings`}>🎧 Set up Join voice</a> : <span style={{ marginLeft: "auto" }} />;
+    return campaign.isDM ? <a className="muted" style={{ marginLeft: "auto", alignSelf: "center", fontSize: 12, whiteSpace: "nowrap" }} href={`#/c/${campaign.id}/settings`} title="Add your Discord invite so players get a Join voice button">🎧 Set up voice</a> : <span style={{ marginLeft: "auto" }} />;
   }
   const inVoice = (voice?.channels ?? []).flatMap((c) => c.members);
   const invite = voice?.invite ?? campaign.discordVoice.invite;

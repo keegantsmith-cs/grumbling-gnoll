@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Image as KImage, Rect, Circle, Group, Text, Line, Shape } from "react-konva";
 import type Konva from "konva";
 import { useStatus } from "../hooks";
@@ -55,7 +55,7 @@ export function TableView({ campaign, live }: { campaign: Campaign; live: Campai
         {side === "party" && <div className="side-body"><PartyPanel campaign={campaign} live={live} /></div>}
         {side === "key" && map?.dmKey && (
           <div className="side-body">
-            <p className="muted">Only you can see this.</p>
+            <p className="notice" style={{ fontSize: 13 }}>🔒 Only you can see the map key.</p>
             {(map.pois?.length ?? 0) > 0 && (
               <div className="row" style={{ marginBottom: 8 }}>
                 <span className="muted" style={{ fontSize: 12 }}>{map.pois.filter((p) => p.revealed).length}/{map.pois.length} markers revealed</span>
@@ -191,23 +191,25 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         <ToolBtn t="ping" cur={tool} set={setTool} label="📍 Ping" />
         {isDM && map.fogEnabled && (
           <>
+            <span className="sep" aria-hidden="true" />
             <ToolBtn t="reveal" cur={tool} set={setTool} label="🖌️ Reveal" title="Paint to remove fog" />
             <ToolBtn t="revealRect" cur={tool} set={setTool} label="▭ Reveal area" />
             <ToolBtn t="hideRect" cur={tool} set={setTool} label="▬ Hide area" />
             {tool === "reveal" && (
-              <select value={brush} onChange={(e) => setBrush(Number(e.target.value))} style={{ width: "auto", padding: "2px 4px" }}>
+              <select aria-label="Brush size" value={brush} onChange={(e) => setBrush(Number(e.target.value))} style={{ width: "auto", padding: "2px 4px" }}>
                 {[0.5, 1, 2, 3, 5].map((b) => <option key={b} value={b}>Brush {b}</option>)}
               </select>
             )}
-            <button onClick={() => live.socket?.emit("fog", { op: "undo" })} title="Undo last fog change">↶</button>
+            <button onClick={() => live.socket?.emit("fog", { op: "undo" })} title="Undo last fog change" aria-label="Undo last fog change">↶ Undo</button>
             <button onClick={() => confirm("Reveal the whole map?") && live.socket?.emit("fog", { op: "clear" })}>Reveal all</button>
             <button onClick={() => confirm("Cover the whole map in fog again?") && live.socket?.emit("fog", { op: "reset" })}>Reset fog</button>
           </>
         )}
-        <button onClick={() => setShowAdd(!showAdd)}>{isDM ? "+ Token" : "+ My token"}</button>
+        <span className="sep" aria-hidden="true" />
+        <button className={showAdd ? "active" : ""} aria-pressed={showAdd} onClick={() => setShowAdd(!showAdd)}>{isDM ? "+ Token" : "+ My token"}</button>
         {isDM && <button onClick={() => setEncounterAt(null)}>⚔️ Encounter</button>}
       </div>
-      <div className="board-hint">{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
+      <div className="board-hint">{tool === "select" ? <>Scroll to zoom · drag to pan · right-click for more · </> : null}{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
 
       <Stage
         width={size.w}
@@ -272,13 +274,13 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
       )}
       {npcAt && (
         <div className="token-panel card">
-          <div className="row"><h3 className="grow" style={{ margin: 0 }}>🧑 Create NPCs here (AI)</h3><button className="small" onClick={() => setNpcAt(null)}>✕</button></div>
+          <div className="panel-head"><h3>🧑 Create NPCs here (AI)</h3><button className="small" aria-label="Close" onClick={() => setNpcAt(null)}>✕</button></div>
           <NpcMaker campaignId={campaign.id} at={npcAt} onDone={() => setNpcAt(null)} />
         </div>
       )}
       {dropAt && (
         <div className="token-panel card">
-          <div className="row"><h3 className="grow" style={{ margin: 0 }}>Add monsters here</h3><button className="small" onClick={() => setDropAt(null)}>✕</button></div>
+          <div className="panel-head"><h3>👹 Add monsters here</h3><button className="small" aria-label="Close" onClick={() => setDropAt(null)}>✕</button></div>
           <MonsterDrop campaignId={campaign.id} at={dropAt} onDone={() => setDropAt(null)} />
         </div>
       )}
@@ -300,7 +302,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
 }
 
 function ToolBtn({ t, cur, set, label, title }: { t: Tool; cur: Tool; set: (t: Tool) => void; label: string; title?: string }) {
-  return <button className={cur === t ? "active" : ""} onClick={() => set(t)} title={title}>{label}</button>;
+  return <button className={cur === t ? "active" : ""} aria-pressed={cur === t} onClick={() => set(t)} title={title}>{label}</button>;
 }
 
 function FogShapes({ map, draft }: { map: MapState; draft: FogShape | null }) {
@@ -378,7 +380,7 @@ function TokenEditor({ t, isDM, canEdit, live, close, campaign, map }: { t: Toke
   const save = (patch: Partial<Token>) => live.socket?.emit("token:update", { id: t.id, ...patch });
   return (
     <div>
-      <div className="row"><h3 className="grow" style={{ margin: 0 }}>{t.name}</h3><button className="small" onClick={close}>✕</button></div>
+      <div className="panel-head"><h3>{t.name}</h3><button className="small" aria-label="Close" onClick={close}>✕</button></div>
       {!canEdit && <p className="muted">You can't control this token.</p>}
       {canEdit && (
         <>
@@ -387,7 +389,7 @@ function TokenEditor({ t, isDM, canEdit, live, close, campaign, map }: { t: Toke
             {isDM && <label className="grow">Max HP<input type="number" value={f.maxHp ?? ""} onChange={(e) => setF({ ...f, maxHp: e.target.value === "" ? null : Number(e.target.value) })} onBlur={() => save({ maxHp: f.maxHp })} /></label>}
           </div>
           <DamageBox t={t} save={save} />
-          <div className="row" style={{ marginBottom: 8 }}>
+          <div className="row" style={{ marginBottom: 8, gap: 4 }} aria-label="Quick HP changes">
             {[-10, -5, -1, 1, 5, 10].map((d) => <button key={d} className="small" onClick={() => save({ hp: (t.hp ?? 0) + d })}>{d > 0 ? `+${d}` : d}</button>)}
           </div>
           <details open={(t.rings ?? []).length > 0} style={{ marginBottom: 8 }}>
@@ -445,9 +447,9 @@ function AddToken({ map, view, size, isDM, campaign, live, close }: { map: MapSt
 
   return (
     <div>
-      <div className="row"><h3 className="grow" style={{ margin: 0 }}>Add a token</h3><button className="small" onClick={close}>✕</button></div>
+      <div className="panel-head"><h3>Add a token</h3><button className="small" aria-label="Close" onClick={close}>✕</button></div>
       <p className="muted">It appears in the middle of your view. Drag it into place.</p>
-      {chars.length > 0 && <label>Character</label>}
+      {chars.length > 0 && <div className="group-label">{isDM ? "Player characters" : "Your character"}</div>}
       <div className="col" style={{ marginBottom: 8 }}>
         {chars.map((c) => <button key={c.id} onClick={() => placeCharacter(c)}>🧝 {c.name}</button>)}
         {!isDM && chars.length === 0 && <p className="muted">You need an approved character in this campaign first.</p>}
@@ -500,7 +502,7 @@ function DamageBox({ t, save }: { t: Token; save: (p: Partial<Token>) => void })
   };
   return (
     <div className="row" style={{ marginBottom: 6 }}>
-      <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Amount" style={{ width: 80 }}
+      <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Amount" aria-label="Damage or healing amount" style={{ width: 80 }}
         onKeyDown={(e) => { if (e.key === "Enter") apply(-1); }} />
       <button className="small danger" disabled={!n} onClick={() => apply(-1)}>💥 Damage</button>
       <button className="small" disabled={!n} onClick={() => apply(1)}>💚 Heal</button>
@@ -527,6 +529,10 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
   const ref = useRef<HTMLDivElement>(null);
   const [sub, setSub] = useState<string | null>(null);
   useEffect(() => {
+    // focus the first choice so the menu works from the keyboard too
+    ref.current?.querySelector<HTMLButtonElement>("button.ctx-item:not(:disabled)")?.focus();
+  }, []);
+  useEffect(() => {
     const off = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
     const esc = (e: KeyboardEvent) => e.key === "Escape" && close();
     setTimeout(() => document.addEventListener("mousedown", off), 0);
@@ -538,7 +544,7 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
   const placeable = chars.filter((c) => isDM || ownedChars.has(c.id));
   const onMap = new Set(map.tokens.map((x) => x.characterId).filter(Boolean));
   const item = (label: string, action: () => void, opts: { danger?: boolean; hint?: string } = {}) => (
-    <div className="ctx-item" style={opts.danger ? { color: "#ff9b85" } : undefined} onClick={() => { action(); close(); }} title={opts.hint}>{label}</div>
+    <button type="button" role="menuitem" className="ctx-item" style={opts.danger ? { color: "#ff9b85" } : undefined} onClick={() => { action(); close(); }} title={opts.hint}>{label}</button>
   );
   const placeChar = (c: any) => live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: c.data.hp.max ?? undefined, ...menu.p });
   const ring = (label: string, feet: number, kind: "ring" | "sight", color: string) => {
@@ -549,11 +555,25 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
   const speed = t?.meta?.speed ?? (t?.characterId ? chars.find((c) => c.id === t.characterId)?.data?.speed : undefined) ?? 30;
   const sight = Math.max(60, ...(t?.meta?.vision ?? []).map((v) => v.feet));
 
-  // keep the menu on screen
-  const left = Math.max(4, Math.min(menu.sx, (ref.current?.parentElement?.clientWidth ?? 9999) - 230));
-  const top = Math.max(4, Math.min(menu.sy, (ref.current?.parentElement?.clientHeight ?? 9999) - 320));
+  // keep the menu on screen, using its real size once it has drawn
+  const [{ left, top }, setPos] = useState({ left: menu.sx, top: menu.sy });
+  useLayoutEffect(() => {
+    const el = ref.current, box = el?.parentElement;
+    if (!el || !box) return;
+    setPos({
+      left: Math.max(4, Math.min(menu.sx, box.clientWidth - el.offsetWidth - 4)),
+      top: Math.max(4, Math.min(menu.sy, box.clientHeight - el.offsetHeight - 4)),
+    });
+  }, [menu.sx, menu.sy, sub]);
   return (
-    <div ref={ref} className="ctx-menu" style={{ left, top }} onContextMenu={(e) => e.preventDefault()}>
+    <div ref={ref} className="ctx-menu" role="menu" aria-label={t ? `${t.name} actions` : "Map actions"} style={{ left, top }} onContextMenu={(e) => e.preventDefault()}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        e.preventDefault();
+        const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button.ctx-item") ?? [])];
+        const i = items.indexOf(document.activeElement as HTMLButtonElement);
+        items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+      }}>
       {t ? (
         <>
           <div className="ctx-title">{t.name}{t.hp != null ? ` · ${t.hp}${t.maxHp ? `/${t.maxHp}` : ""} HP` : ""}</div>
@@ -576,12 +596,12 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
         <>
           <div className="ctx-title">Here</div>
           {placeable.length > 0 && (
-            <div className="ctx-item" onMouseEnter={() => setSub("chars")} onClick={() => setSub(sub === "chars" ? null : "chars")}>🧝 {isDM ? "Add a player character" : "Place my character"} ▸</div>
+            <button type="button" role="menuitem" aria-expanded={sub === "chars"} className="ctx-item" onMouseEnter={() => setSub("chars")} onClick={() => setSub(sub === "chars" ? null : "chars")}>🧝 {isDM ? "Add a player character" : "Place my character"} {sub === "chars" ? "▾" : "▸"}</button>
           )}
           {sub === "chars" && placeable.map((c) => (
-            <div key={c.id} className="ctx-item ctx-sub" onClick={() => { placeChar(c); close(); }}>
-              {c.name} {onMap.has(c.id) && <span className="muted" style={{ fontSize: 11 }}>(already on map)</span>}
-            </div>
+            <button type="button" role="menuitem" key={c.id} className="ctx-item ctx-sub" onClick={() => { placeChar(c); close(); }}>
+              {c.name} {onMap.has(c.id) && <span className="muted" style={{ fontSize: 12 }}>(already on map)</span>}
+            </button>
           ))}
           {isDM && item("👹 Add monsters here…", () => openMonster(menu.p))}
           {isDM && item("🧑 Create NPCs here (AI)…", () => openNpcs(menu.p))}
@@ -590,7 +610,7 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
           {isDM && item("📌 Add a marker here…", () => { const title = prompt("Marker name (only you see it until you reveal it):"); if (title) live.socket?.emit("poi", { op: "add", x: menu.p.x, y: menu.p.y, title, note: prompt("Notes for you (optional):") ?? "" }); })}
           {isDM && map.fogEnabled && item("☀️ Reveal fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "reveal", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
           {isDM && map.fogEnabled && item("🌑 Cover with fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "hide", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
-          {!isDM && placeable.length === 0 && <div className="ctx-item muted" style={{ cursor: "default" }}>You need an approved character to place a token.</div>}
+          {!isDM && placeable.length === 0 && <div className="ctx-item muted" style={{ cursor: "default", whiteSpace: "normal" }}>You need an approved character to place a token.</div>}
         </>
       )}
     </div>

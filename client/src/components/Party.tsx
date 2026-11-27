@@ -30,7 +30,7 @@ function QuickSheet({ c, live, compact, reload }: { c: any; live: CampaignSocket
   return (
     <div className="card" style={{ marginBottom: 0 }}>
       <div className="row">
-        <b className="grow" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} {d.name}</b>
+        <button type="button" className="link grow" style={{ textDecoration: "none", color: "var(--text)", fontWeight: 700, textAlign: "left" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} {d.name}</button>
         <span className="muted">{c.ownerName}</span>
       </div>
       <div className="muted" style={{ fontSize: 12 }}>Lvl {dv.level} {classSummary(d)}</div>
@@ -42,22 +42,26 @@ function QuickSheet({ c, live, compact, reload }: { c: any; live: CampaignSocket
       </div>
       {open && (
         <>
-          <div className="row" style={{ marginBottom: 6 }}>
-            {[-5, -1, 1, 5].map((n) => <button key={n} className="small" onClick={() => setHp(d.hp.current + n)}>{n > 0 ? `+${n}` : n} HP</button>)}
-            <button className="small" onClick={() => live.socket?.emit("initiative", { op: "roll", name: d.name, bonus: dv.initiative })}>Roll initiative</button>
+          <button className="primary small" style={{ marginBottom: 4 }} onClick={() => live.socket?.emit("initiative", { op: "roll", name: d.name, bonus: dv.initiative })}>🎲 Roll initiative ({fmtMod(dv.initiative)})</button>
+          <div className="group-label">Hit points</div>
+          <div className="row" style={{ gap: 4 }}>
+            {[-5, -1, 1, 5].map((n) => <button key={n} className="small" aria-label={`${n > 0 ? "Heal" : "Lose"} ${Math.abs(n)} HP`} onClick={() => setHp(d.hp.current + n)}>{n > 0 ? `+${n}` : n}</button>)}
           </div>
+          <div className="group-label">Ability checks</div>
           <div className="row" style={{ gap: 4 }}>
             {ABILITIES.map((a) => <button key={a} className="small" title={`${ABILITY_NAMES[a]} check`} onClick={() => roll(dv.mods[a], `${ABILITY_NAMES[a]} check`)}>{a.toUpperCase()} {fmtMod(dv.mods[a])}</button>)}
           </div>
-          <div className="row" style={{ gap: 4, marginTop: 4 }}>
-            {ABILITIES.map((a) => <button key={a} className="small" title={`${ABILITY_NAMES[a]} save`} onClick={() => roll(dv.saves[a], `${ABILITY_NAMES[a]} save`)}>{a.toUpperCase()} save {fmtMod(dv.saves[a])}</button>)}
+          <div className="group-label">Saving throws</div>
+          <div className="row" style={{ gap: 4 }}>
+            {ABILITIES.map((a) => <button key={a} className="small" title={`${ABILITY_NAMES[a]} save`} onClick={() => roll(dv.saves[a], `${ABILITY_NAMES[a]} save`)}>{a.toUpperCase()} {fmtMod(dv.saves[a])}</button>)}
           </div>
-          <select style={{ marginTop: 6 }} value="" onChange={(e) => { const s = SKILLS.find((x) => x.key === e.target.value); if (s) roll(dv.skills[s.key], s.name); }}>
+          <select style={{ marginTop: 8 }} aria-label="Roll a skill" value="" onChange={(e) => { const s = SKILLS.find((x) => x.key === e.target.value); if (s) roll(dv.skills[s.key], s.name); }}>
             <option value="">Roll a skill...</option>
             {SKILLS.map((s) => <option key={s.key} value={s.key}>{s.name} {fmtMod(dv.skills[s.key])}</option>)}
           </select>
+          {d.attacks.length > 0 && <div className="group-label">Attacks</div>}
           {d.attacks.length > 0 && (
-            <div className="col" style={{ marginTop: 6, gap: 4 }}>
+            <div className="col" style={{ gap: 4 }}>
               {d.attacks.map((at, i) => (
                 <div key={i} className="row">
                   <span className="grow">{at.name}</span>
@@ -67,7 +71,7 @@ function QuickSheet({ c, live, compact, reload }: { c: any; live: CampaignSocket
               ))}
             </div>
           )}
-          <button className="link" style={{ marginTop: 6 }} onClick={() => go(`c/${c.campaignId}/characters/${c.id}`)}>Open full sheet</button>
+          <button className="link" style={{ marginTop: 10, display: "block" }} onClick={() => go(`c/${c.campaignId}/characters/${c.id}`)}>Open full sheet</button>
         </>
       )}
     </div>

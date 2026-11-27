@@ -14,24 +14,25 @@ export function InitiativePanel({ campaign, live }: { campaign: Campaign; live: 
       <div className="row" style={{ marginBottom: 8 }}>
         <h3 className="grow" style={{ margin: 0 }}>Round {round}</h3>
         {dm && <>
-          <button className="small" onClick={() => emit({ op: "prev" })}>◀</button>
+          <button className="small" onClick={() => emit({ op: "prev" })} aria-label="Previous turn" title="Previous turn">◀</button>
           <button className="small primary" onClick={() => emit({ op: "next" })}>Next turn ▶</button>
         </>}
       </div>
       <ul className="init-list">
         {entries.map((e, i) => (
-          <li key={e.id} className={i === turn ? "current" : ""}>
+          <li key={e.id} className={i === turn ? "current" : ""} aria-current={i === turn ? "step" : undefined}>
             {dm ? (
-              <input className="score" type="number" defaultValue={e.init ?? 0} onBlur={(ev) => emit({ op: "set", id: e.id, init: ev.target.value })} style={{ width: 52, padding: 2 }} />
+              <input className="score" type="number" aria-label={`Initiative for ${e.name}`} defaultValue={e.init ?? 0} onBlur={(ev) => emit({ op: "set", id: e.id, init: ev.target.value })} style={{ width: 52, padding: 2 }} />
             ) : <span className="score">{e.init ?? "?"}</span>}
             <span className="grow">{e.name} {e.hidden && dm && <span className="muted">(hidden)</span>}</span>
-            {dm && <button className="small" title={e.hidden ? "Show to players" : "Hide from players"} onClick={() => emit({ op: "set", id: e.id, hidden: !e.hidden })}>{e.hidden ? "🙈" : "👁"}</button>}
-            {(dm || e.ownerId === status.user?.id) && dm && <button className="small danger" onClick={() => emit({ op: "remove", id: e.id })}>✕</button>}
+            {dm && <button className="small" title={e.hidden ? "Show to players" : "Hide from players"} aria-label={e.hidden ? `Show ${e.name} to players` : `Hide ${e.name} from players`} onClick={() => emit({ op: "set", id: e.id, hidden: !e.hidden })}>{e.hidden ? "🙈" : "👁"}</button>}
+            {(dm || e.ownerId === status.user?.id) && dm && <button className="small danger" aria-label={`Remove ${e.name}`} title="Remove from turn order" onClick={() => emit({ op: "remove", id: e.id })}>✕</button>}
           </li>
         ))}
       </ul>
-      {entries.length === 0 && <p className="muted">No one in the turn order yet.</p>}
+      {entries.length === 0 && <p className="muted">No one in the turn order yet. {dm ? "Monsters you add to the map join automatically; add anyone else below." : "Roll for your character below when the DM calls for initiative."}</p>}
       <hr />
+      <h3 style={{ marginBottom: 6 }}>{dm ? "Add to the turn order" : "Join the turn order"}</h3>
       <form onSubmit={(e) => {
         e.preventDefault();
         if (!f.name.trim()) return;
