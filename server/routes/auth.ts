@@ -2,6 +2,7 @@ import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { COOKIE, createSession, hashPassword, newInviteCode, requireAdmin, requireUser, setSessionCookie, verifyPassword } from "../auth.ts";
 import { HttpError } from "../helpers.ts";
+import { checkLimit, clearLimit, hit } from "../ratelimit.ts";
 import { AI_MODEL, aiEnabled } from "../ai.ts";
 
 export const authRoutes = Router();
@@ -13,6 +14,8 @@ authRoutes.get("/status", (req, res) => {
 
 authRoutes.post("/register", (req, res) => {
   const { username, displayName, password, inviteCode } = req.body ?? {};
+  checkLimit(`register:${req.ip}`, 10, 3600e3);
+  hit(`register:${req.ip}`);
   if (typeof username !== "string" || !/^[a-zA-Z0-9_.-]{3,30}$/.test(username))
     throw new HttpError(400, "Username must be 3-30 letters, numbers, dots, dashes or underscores");
   if (typeof password !== "string" || password.length < 8) throw new HttpError(400, "Password must be at least 8 characters");
@@ -36,8 +39,16 @@ authRoutes.post("/register", (req, res) => {
 
 authRoutes.post("/login", (req, res) => {
   const { username, password } = req.body ?? {};
+  const ipKey = `login-ip:${req.ip}`, userKey = `login-user:${String(username ?? "").toLowerCase()}`;
+  checkLimit(ipKey, 20, 15 * 60e3);
+  checkLimit(userKey, 8, 15 * 60e3);
   const u = one("SELECT * FROM users WHERE username = ?", String(username ?? ""));
-  if (!u || !verifyPassword(String(password ?? ""), u.pass_hash)) throw new HttpError(401, "Wrong username or password");
+  if (!u || !verifyPassword(String(password ?? ""), u.pass_hash)) {
+    hit(ipKey);
+    hit(userKey);
+    throw new HttpError(401, "Wrong username or password");
+  }
+  clearLimit(userKey);
   setSessionCookie(res, createSession(u.id));
   res.json({ ok: true });
 });
@@ -52,7 +63,8 @@ authRoutes.post("/logout", (req, res) => {
 authRoutes.post("/me/password", requireUser, (req, res) => {
   const { current, next } = req.body ?? {};
   const u = one("SELECT * FROM users WHERE id = ?", req.user!.id)!;
-  if (!verifyPassword(String(current ?? ""), u.pass_hash)) throw new HttpError(400, "Current password is wrong");
+  checkLimit(`pw:${u.id}`, 8, 15 * 60e3);
+  if (!verifyPassword(String(current ?? ""), u.pass_hash)) { hit(`pw:${u.id}`); throw new HttpError(400, "Current password is wrong"); }
   if (typeof next !== "string" || next.length < 8) throw new HttpError(400, "New password must be at least 8 characters");
   run("UPDATE users SET pass_hash = ? WHERE id = ?", hashPassword(next), u.id);
   res.json({ ok: true });
@@ -72,6 +84,8 @@ authRoutes.get("/users", requireUser, (_req, res) => {
 
 // Lets the sign-up page show which campaign an invite is for
 authRoutes.get("/invites/:code/info", (req, res) => {
+  checkLimit(`invite:${req.ip}`, 30, 15 * 60e3);
+  hit(`invite:${req.ip}`);
   const i = one("SELECT i.uses_left, c.name AS campaign FROM invites i LEFT JOIN campaigns c ON c.id = i.campaign_id WHERE i.code = ?", String(req.params.code).toUpperCase());
   if (!i || i.uses_left <= 0) throw new HttpError(404, "That invite has been used up or deleted");
   res.json({ campaign: i.campaign ?? null });
