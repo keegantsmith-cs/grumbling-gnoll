@@ -20,7 +20,8 @@ const out = (c: any, isDM: boolean) => ({
   nextSessionAt: c.next_session_at,
   sessionNote: c.session_note,
   sessionWeekly: !!c.session_weekly,
-  discord: isDM ? { webhook: c.discord_webhook, dmWebhook: c.discord_dm_webhook, options: JSON.parse(c.discord_options || "{}") } : undefined,
+  discord: isDM ? { webhook: c.discord_webhook, dmWebhook: c.discord_dm_webhook, options: JSON.parse(c.discord_options || "{}"), invite: c.discord_invite, serverId: c.discord_server_id } : undefined,
+  discordVoice: { invite: c.discord_invite || null, widget: !!c.discord_server_id },
   isDM,
 });
 
@@ -67,6 +68,11 @@ campaignRoutes.patch("/campaigns/:id", (req, res) => {
     const o = b.discord.options ?? {};
     const opts = { rolls: !!o.rolls, initiative: !!o.initiative, shares: !!o.shares, maps: !!o.maps, chat: !!o.chat };
     run("UPDATE campaigns SET discord_webhook = ?, discord_dm_webhook = ?, discord_options = ? WHERE id = ?", wh, dmWh, JSON.stringify(opts), id);
+    const invite = String(b.discord.invite ?? "").trim();
+    if (invite && !/^https:\/\/(discord\.gg|(www\.)?discord(app)?\.com\/invite)\/[\w-]+$/.test(invite)) throw new HttpError(400, "The invite link should look like https://discord.gg/abc123");
+    const serverId = String(b.discord.serverId ?? "").trim();
+    if (serverId && !/^\d{15,22}$/.test(serverId)) throw new HttpError(400, "The Server ID is a long number, like 123456789012345678");
+    run("UPDATE campaigns SET discord_invite = ?, discord_server_id = ? WHERE id = ?", invite, serverId, id);
   }
   notify(id, "campaign");
   res.json({ ok: true });
@@ -196,5 +202,32 @@ campaignRoutes.post("/campaigns/:id/table/monsters", (req, res) => {
     res.json({ added: n });
   } catch (e) {
     throw new HttpError(400, (e as Error).message);
+  }
+});
+
+// Who's in Discord voice right now (from Discord's public server widget), cached for a minute
+const voiceCache = new Map<string, { at: number; data: unknown }>();
+campaignRoutes.get("/campaigns/:id/discord/voice", async (req, res) => {
+  const { campaign } = campaignAccess(req);
+  const serverId = campaign.discord_server_id;
+  if (!serverId) return res.json({ invite: campaign.discord_invite || null, enabled: false, channels: [] });
+  const cached = voiceCache.get(serverId);
+  if (cached && Date.now() - cached.at < 60_000) return res.json({ ...(cached.data as object), invite: campaign.discord_invite || (cached.data as any).invite });
+  try {
+    const r = await fetch(`https://discord.com/api/guilds/${serverId}/widget.json`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) {
+      const data = { enabled: false, error: r.status === 403 ? "The server widget is turned off in Discord (Server Settings → Widget)." : `Discord said ${r.status}`, channels: [], invite: null };
+      voiceCache.set(serverId, { at: Date.now(), data });
+      return res.json({ ...data, invite: campaign.discord_invite || null });
+    }
+    const w = (await r.json()) as { name: string; instant_invite: string | null; channels: { id: string; name: string; position: number }[]; members: { username: string; avatar_url?: string; channel_id?: string }[] };
+    const channels = w.channels
+      .sort((a, b) => a.position - b.position)
+      .map((ch) => ({ name: ch.name, members: w.members.filter((m) => m.channel_id === ch.id).map((m) => ({ name: m.username, avatar: m.avatar_url ?? null })) }));
+    const data = { enabled: true, server: w.name, invite: w.instant_invite, channels, online: w.members.length };
+    voiceCache.set(serverId, { at: Date.now(), data });
+    res.json({ ...data, invite: campaign.discord_invite || w.instant_invite });
+  } catch {
+    res.json({ enabled: false, error: "Couldn't reach Discord right now.", channels: [], invite: campaign.discord_invite || null });
   }
 });

@@ -11,12 +11,14 @@ import { Converter } from "./Converter";
 import { Settings } from "./Settings";
 import { Adventures } from "./Adventures";
 import { DiceTray } from "../components/DiceTray";
+import { VoiceButton } from "../components/VoiceButton";
 
 export interface Campaign {
   id: number; name: string; description: string; rulesVersion: "2014" | "2024"; dmUserId: number; dmName: string;
   activeMapId: number | null; dmNotes?: string; isDM: boolean;
   nextSessionAt: string | null; sessionNote: string; sessionWeekly: boolean;
-  discord?: { webhook: string; dmWebhook: string; options: Record<string, boolean> };
+  discord?: { webhook: string; dmWebhook: string; options: Record<string, boolean>; invite: string; serverId: string };
+  discordVoice: { invite: string | null; widget: boolean };
   members: { id: number; username: string; displayName: string; role: string }[];
 }
 
@@ -57,7 +59,8 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
             {!!count && <span className="badge">{count}</span>}
           </button>
         ))}
-        <span style={{ marginLeft: "auto", alignSelf: "center" }} className="muted" title={live.presence.map((p) => p.name).join(", ")}>
+        <VoiceButton campaign={campaign} />
+        <span style={{ marginLeft: 12, alignSelf: "center", whiteSpace: "nowrap" }} className="muted" title={live.presence.map((p) => p.name).join(", ")}>
           {live.connected ? `🟢 ${live.presence.length} online` : "🔴 reconnecting..."}
         </span>
       </div>

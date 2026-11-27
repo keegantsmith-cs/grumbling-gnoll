@@ -133,13 +133,15 @@ function SessionCard({ campaign, reload }: { campaign: Campaign; reload: () => v
 
 function DiscordCard({ campaign, reload }: { campaign: Campaign; reload: () => void }) {
   const { toast } = useStatus();
-  const dc = campaign.discord ?? { webhook: "", dmWebhook: "", options: {} };
+  const dc = campaign.discord ?? { webhook: "", dmWebhook: "", options: {}, invite: "", serverId: "" };
   const [webhook, setWebhook] = useState(dc.webhook);
   const [dmWebhook, setDmWebhook] = useState(dc.dmWebhook);
   const [opts, setOpts] = useState({ rolls: true, initiative: true, shares: true, maps: true, chat: false, ...dc.options });
   const [help, setHelp] = useState(!dc.webhook);
+  const [invite, setInvite] = useState(dc.invite ?? "");
+  const [serverId, setServerId] = useState(dc.serverId ?? "");
   const save = async () => {
-    try { await api.patch(`/campaigns/${campaign.id}`, { discord: { webhook, dmWebhook, options: opts } }); toast("Discord settings saved"); reload(); }
+    try { await api.patch(`/campaigns/${campaign.id}`, { discord: { webhook, dmWebhook, options: opts, invite, serverId } }); toast("Discord settings saved"); reload(); }
     catch (e) { toast((e as Error).message); }
   };
   const test = (which: string) => api.post(`/campaigns/${campaign.id}/discord/test`, { which }).then(() => toast("Test message sent. Check Discord!")).catch((e) => toast(e.message));
@@ -172,6 +174,16 @@ function DiscordCard({ campaign, reload }: { campaign: Campaign; reload: () => v
       <label>DM alerts webhook (private: approvals waiting, AI checks done, conversions done)
         <input value={dmWebhook} onChange={(e) => setDmWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." type="password" autoComplete="off" />
       </label>
+      <h3 style={{ marginTop: 16 }}>🎧 Join voice button</h3>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Adds a <b>Join voice</b> button to the top of the campaign for everyone, and (with the widget) shows who's in voice right now.</p>
+      <ol className="muted" style={{ fontSize: 13, paddingLeft: 20 }}>
+        <li><b>Invite link:</b> in Discord, right-click your server icon → <b>Invite People</b> → <b>Edit invite link</b> → set <b>Expire After: Never</b> → copy the link.</li>
+        <li><b>Who's in voice (optional):</b> <b>Server Settings → Widget</b> → turn on <b>Enable Server Widget</b> → copy the <b>Server ID</b>.</li>
+      </ol>
+      <div className="row top">
+        <label className="grow">Server invite link<input value={invite} onChange={(e) => setInvite(e.target.value)} placeholder="https://discord.gg/abc123" /></label>
+        <label className="grow">Server ID (for the widget)<input value={serverId} onChange={(e) => setServerId(e.target.value)} placeholder="123456789012345678" /></label>
+      </div>
       <div className="row">
         <button className="primary" onClick={save}>Save</button>
         <button disabled={!dc.webhook} onClick={() => test("table")}>Send test to game channel</button>

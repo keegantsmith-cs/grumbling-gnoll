@@ -308,3 +308,5 @@ CREATE TABLE IF NOT EXISTS session_recaps (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+addColumn("campaigns", "discord_invite", "TEXT NOT NULL DEFAULT ''");
+addColumn("campaigns", "discord_server_id", "TEXT NOT NULL DEFAULT ''");
