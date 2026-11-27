@@ -3,6 +3,7 @@ import { api } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { Markdown } from "../components/Markdown";
+import { AdventureMaps } from "../components/AdventureMaps";
 
 const EDITIONS = ["5e 2014", "5e 2024", "OD&D (1974) / Basic", "AD&D 1st Edition", "AD&D 2nd Edition", "D&D 3.0 / 3.5", "D&D 4th Edition", "Pathfinder 1e", "Pathfinder 2e", "Other / unknown"];
 
@@ -131,6 +132,12 @@ function AdventureView({ id, campaign, changed }: { id: number; campaign: Campai
           <button className="small" onClick={() => { if (editingSynopsis) api.patch(`/adventures/${a.id}`, { synopsis }).then(() => { toast("Saved"); reload(); }); setEditingSynopsis(!editingSynopsis); }}>{editingSynopsis ? "Save" : "Edit"}</button>
         </div>
         {editingSynopsis ? <textarea rows={14} value={synopsis} onChange={(e) => setSynopsis(e.target.value)} /> : a.synopsis ? <Markdown text={a.synopsis} /> : <p className="muted">The overview is written after all pages are read.</p>}
+      </div>
+
+      <div className="card">
+        <h2>🗺️ Maps in this adventure</h2>
+        <p className="muted" style={{ fontSize: 12 }}>Maps the AI spotted while reading. Add one to your Maps (you can crop it from the page), then show it to the players with fog of war.</p>
+        <AdventureMaps campaignId={campaign.id} adventureId={a.id} maps={a.maps} reload={reload} />
       </div>
 
       <h2>Run guide</h2>

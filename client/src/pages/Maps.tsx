@@ -3,10 +3,12 @@ import { api, imageSize } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import type { CampaignSocket } from "../socket";
+import { AdventureMaps, type AdvMap } from "../components/AdventureMaps";
 
 export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live: CampaignSocket; onChange: () => void }) {
   const { status, toast } = useStatus();
   const maps = useLoad<any[]>(`/campaigns/${campaign.id}/maps`);
+  const advMaps = useLoad<AdvMap[]>(`/campaigns/${campaign.id}/adventure-maps`);
   const [mode, setMode] = useState<"upload" | "generate" | "ai" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -100,6 +102,12 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
       </table>
       {maps.data?.length === 0 && <p className="muted">No maps yet.</p>}
       {activeId && <button style={{ marginTop: 10 }} onClick={() => show(null)}>Take the map off the table</button>}
+      {advMaps.data && advMaps.data.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>📚 Maps from your adventures</h2>
+          <AdventureMaps campaignId={campaign.id} maps={advMaps.data} reload={() => { advMaps.reload(); maps.reload(); }} showAdventure />
+        </div>
+      )}
     </div>
   );
 }

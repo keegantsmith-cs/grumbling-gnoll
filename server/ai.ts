@@ -496,6 +496,14 @@ const AdventureChunkSchema = z.object({
   })),
   monsters: z.array(MonsterSchema),
   items: z.array(ItemSchema),
+  maps: z.array(z.object({
+    page: z.number(),
+    title: z.string(),
+    kind: z.enum(["battle", "dungeon", "region", "world", "other"]),
+    has_grid: z.enum(["square", "hex", "none"]),
+    cells_across: z.number(),
+    description: z.string(),
+  })),
 });
 export type AdventureChunk = z.infer<typeof AdventureChunkSchema>;
 
@@ -531,6 +539,7 @@ Build the run-guide for these pages:
   - Otherwise stat_reference is "" and stats is null.
 - monsters: ${is5e ? "only NEW or unique creatures with full stat blocks printed on these pages (skip standard Monster Manual creatures that are only referenced)" : "every creature with stats on these pages, converted to 5e"}.
 - items: magic items described on these pages${is5e ? "" : ", converted to 5e"}.
+- maps: every page that shows a map (dungeon/building floor plan, battle map, region or world map). page is the PDF page number counting from 1 for the FIRST page you were given as ${opts.pageLabel.replace("pages ", "").split("-")[0]} (i.e. use the real page numbers in that range). has_grid: the grid printed on the map. cells_across: roughly how many grid squares/hexes span the map's width (0 if no grid or unsure). description: one line (what it shows, scale if printed).
 Skip front matter, credits, ads, and the table of contents. Use empty lists when there's nothing.`,
           },
         ],

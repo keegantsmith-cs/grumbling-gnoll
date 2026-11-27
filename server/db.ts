@@ -233,3 +233,17 @@ CREATE TABLE IF NOT EXISTS adventure_sections (
 CREATE INDEX IF NOT EXISTS idx_sections_adv ON adventure_sections(adventure_id, position);
 `);
 addColumn("compendium", "adventure_id", "INTEGER");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS adventure_maps (
+  id INTEGER PRIMARY KEY,
+  adventure_id INTEGER NOT NULL REFERENCES adventures(id) ON DELETE CASCADE,
+  page INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'battle', -- battle | dungeon | region | world | other
+  grid_type TEXT NOT NULL DEFAULT 'none',
+  cells_across INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
+  map_id INTEGER REFERENCES maps(id) ON DELETE SET NULL
+);
+`);

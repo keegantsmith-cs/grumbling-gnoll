@@ -22,7 +22,7 @@ fi
 
 echo "==> Installing system packages"
 apt-get update -y
-apt-get install -y curl git build-essential debian-keyring debian-archive-keyring apt-transport-https ufw
+apt-get install -y curl git build-essential poppler-utils debian-keyring debian-archive-keyring apt-transport-https ufw
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
   echo "==> Installing Node.js 22"

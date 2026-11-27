@@ -1,0 +1,202 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Rats in the Cellar</title>
+<style>
+  @page { size: Letter; margin: 0.6in; }
+  body { font: 11pt/1.45 Georgia, serif; color: #222; }
+  h1 { font-size: 34pt; text-align: center; color: #7a1f12; margin: 1.6in 0 0.2in; }
+  h2 { color: #7a1f12; border-bottom: 2px solid #b5432c; padding-bottom: 2px; margin-top: 0; }
+  h3 { color: #7a1f12; margin: 14px 0 4px; }
+  .page { page-break-after: always; }
+  .box { background: #efe3c4; border-left: 4px solid #7a1f12; padding: 8px 12px; font-style: italic; margin: 8px 0; }
+  .sb { background: #f6edd6; border-top: 4px solid #9c2b1b; border-bottom: 4px solid #9c2b1b; padding: 8px 12px; margin: 10px 0; columns: 1; }
+  .sb h4 { margin: 0; font-size: 15pt; color: #7a1f12; }
+  .sb .abil { display: flex; justify-content: space-between; text-align: center; margin: 4px 0; }
+  .sb hr { border: 0; border-top: 2px solid #9c2b1b; }
+  .two { columns: 2; column-gap: 0.35in; }
+  .center { text-align: center; }
+  .old { font-family: "Courier New", monospace; font-size: 10pt; background: #eee; padding: 8px; }
+  canvas { display: block; margin: 0 auto; }
+</style></head>
+<body>
+
+<div class="page">
+  <h1>Rats in the Cellar</h1>
+  <p class="center" style="font-size:15pt">A short adventure for 3–5 characters of 1st to 3rd level</p>
+  <p class="center"><i>Written as a test adventure for The Grumbling Gnoll virtual tabletop</i></p>
+  <p class="center" style="margin-top:2.5in">For D&amp;D 5th Edition · Original content · Free to use at your table</p>
+</div>
+
+<div class="page two">
+  <h2>Introduction</h2>
+  <p>The Grumbling Gnoll is the busiest tavern in the river town of Bramblecross. For a week, kegs have gone missing from its cellar, strange scratching echoes through the floorboards at night, and yesterday the pot-boy, Wendel, went down for a cask of cider and never came back up.</p>
+  <p>The tavern's owner, a retired gnoll adventurer named Grukk Ashpaw, is too old and too wide to squeeze through the cellar's narrow tunnels. He offers the party 50 gold pieces each, free drinks for life, and his old adventuring blade to whoever brings Wendel home.</p>
+  <h3>Adventure Summary</h3>
+  <p>Beneath the cellar, smugglers once dug tunnels to the river. A wererat named Skritch, who calls himself the Rat King, has moved into the old smugglers' vault with a horde of rats. He has been stealing ale to bribe the town's beggars into becoming his spies, and he kidnapped Wendel because the boy saw him. The party must descend through the cellars (Chapter 2), deal with the rat swarms and a collapsing tunnel, and confront Skritch in his den (Chapter 3).</p>
+  <h3>Adventure Hooks</h3>
+  <ul>
+    <li><b>Regulars.</b> The characters are drinking at the Grumbling Gnoll when Grukk bangs a tankard on the bar and asks for help.</li>
+    <li><b>The Missing Boy.</b> Wendel's mother, the washerwoman Hester, begs the party to find her son.</li>
+    <li><b>Old Debts.</b> One character once served with Grukk, who saved their life. He calls in the favor.</li>
+  </ul>
+  <h2>Chapter 1: The Grumbling Gnoll</h2>
+  <div class="box">Warm light, wood smoke and the smell of spiced sausages fill the low-beamed common room. A huge gray-furred gnoll in a stained apron leans on the bar, grumbling to himself as he polishes a tankard that is already clean. Behind him, a trapdoor in the floor is held shut with a heavy iron bar.</div>
+  <h3>Grukk Ashpaw</h3>
+  <p>Grukk is a gnoll who left his clan as a pup and spent twenty years adventuring before buying the tavern. He is gruff, sentimental, and fiercely protective of his staff. He grumbles constantly but means none of it. If combat breaks out in the tavern, use the <b>veteran</b> statistics for Grukk. He tells the party:</p>
+  <ul>
+    <li>The scratching started a week ago, always after midnight.</li>
+    <li>Six kegs of his best Mirewood Stout are gone, and the cellar's back wall has a fresh hole in it.</li>
+    <li>Wendel went down yesterday at noon. Grukk heard a squeal and a crash.</li>
+  </ul>
+  <h3>Pip Merriweather</h3>
+  <p>Pip is a cheerful halfling barmaid who knows every rumor in town. With a successful DC 12 Charisma (Persuasion) check, or a generous tip, she shares that the beggars by the docks have been drinking very good ale lately, and that one of them muttered something about "the King under the Gnoll." Pip is a noncombatant (use the <b>commoner</b> statistics).</p>
+  <h3>Into the Cellar</h3>
+  <p>Grukk lifts the iron bar and lights the party a lantern. Area 1 on the Cellar map is directly below the trapdoor.</p>
+</div>
+
+<div class="page">
+  <h2>Map: The Grumbling Gnoll's Cellars</h2>
+  <canvas id="cellar" width="960" height="720"></canvas>
+  <p class="center"><i>One square = 5 feet. S = secret door.</i></p>
+</div>
+
+<div class="page two">
+  <h2>Chapter 2: The Cellars</h2>
+  <p>The cellars are dark unless noted. Ceilings are 8 feet high in the cellar rooms and 5 feet high in the smugglers' tunnels, where Medium creatures must squeeze.</p>
+  <h3>1. Tavern Cellar</h3>
+  <div class="box">Barrels and crates line the walls of this cool stone room. The air smells of spilled beer and something worse: wet fur. A ragged hole has been gnawed through the plaster of the far wall.</div>
+  <p>A successful DC 10 Wisdom (Survival) check finds dozens of tiny rat tracks and the drag marks of a keg leading east through the hole. Wendel's dropped cider jug lies smashed near the hole.</p>
+  <h3>2. Root Cellar</h3>
+  <p>Sacks of potatoes and onions. Two <b>swarms of cellar rats</b> (see Appendix) are feeding here and attack anything that enters. A sack in the corner hides 14 sp that Wendel had been saving.</p>
+  <h3>3. The Old Tunnel</h3>
+  <div class="box">The gnawed hole opens into a narrow, rough-cut tunnel. Old timber props hold up the low ceiling, and some of them are badly chewed.</div>
+  <p><b>Trap: Weakened Props.</b> The third timber prop has been gnawed nearly through. A creature that walks past without care knocks it loose. Each creature in the 10-foot section must make a DC 12 Dexterity saving throw, taking 2d6 bludgeoning damage on a failure, or half as much on a success. A character who succeeds on a DC 13 Wisdom (Perception) check notices the damaged prop and can pass safely.</p>
+  <h3>4. Smugglers' Storeroom</h3>
+  <p>Grukk's six stolen kegs are stacked here, one of them tapped and half empty. Three <b>giant rats</b> guard them. A crude map scratched on the wall shows the docks, with several beggars' corners marked.</p>
+  <h3>5. Flooded Passage</h3>
+  <p>Water 3 feet deep fills this passage (difficult terrain). A successful DC 14 Wisdom (Perception) check reveals a <b>secret door</b> in the north wall leading straight to area 6, bypassing the guards there.</p>
+  <h2>Chapter 3: The Rat King's Den</h2>
+  <h3>6. The Smugglers' Vault</h3>
+  <div class="box">A wide vault opens before you, lit by a single guttering candle stuck on a skull. A throne of broken barrels and crates sits at the far end. On it lounges a lanky man in a moth-eaten crown made of bent spoons, scratching his long nose. Behind him, tied to a post, a frightened boy in an apron struggles against his ropes.</div>
+  <p><b>Skritch, the Rat King</b> (see below) is here with one <b>swarm of cellar rats</b>. Skritch is cowardly and vain. He first tries to bargain, offering the party "a share of the kingdom's ale." If reduced to half his hit points, he turns into a rat and flees toward the river outlet. If cornered, he surrenders and begs for mercy.</p>
+  <p><b>Treasure.</b> In the throne: 85 gp, a silver locket (25 gp), a potion of healing, and the <b>Ever-Full Tankard</b> (see Appendix), which Skritch stole from Grukk years ago without knowing what it was.</p>
+  <h3>Wendel</h3>
+  <p>Wendel is a brave, chatty 12-year-old human (use the <b>commoner</b> statistics). Once freed, he explains that Skritch plans to use his beggar spies to rob the town's moneylender during the harvest festival.</p>
+  <h3>Conclusion</h3>
+  <p>Grukk pays the reward, presses his old blade (a +1 longsword) into the hands of the bravest character, and declares the party's drinks free forever. If Skritch escaped, he swears revenge, a hook for future adventures.</p>
+</div>
+
+<div class="page">
+  <h2>Skritch, the Rat King</h2>
+  <div class="sb">
+    <h4>Skritch, the Rat King</h4>
+    <i>Medium humanoid (human, shapechanger), chaotic evil</i><hr>
+    <b>Armor Class</b> 13 (studded leather)<br><b>Hit Points</b> 33 (6d8 + 6)<br><b>Speed</b> 30 ft. (40 ft. in rat form)<hr>
+    <div class="abil"><div><b>STR</b><br>10 (+0)</div><div><b>DEX</b><br>15 (+2)</div><div><b>CON</b><br>12 (+1)</div><div><b>INT</b><br>11 (+0)</div><div><b>WIS</b><br>10 (+0)</div><div><b>CHA</b><br>14 (+2)</div></div><hr>
+    <b>Skills</b> Deception +4, Perception +2, Stealth +4<br><b>Damage Immunities</b> bludgeoning, piercing, and slashing from nonmagical attacks that aren't silvered<br><b>Senses</b> darkvision 60 ft., passive Perception 12<br><b>Languages</b> Common (can't speak in rat form)<br><b>Challenge</b> 2 (450 XP) · <b>Proficiency Bonus</b> +2<hr>
+    <p><b><i>Shapechanger.</i></b> Skritch can use his action to turn into a giant rat or back into his human form. His statistics are the same in each form. Any equipment he is wearing or carrying isn't transformed.</p>
+    <p><b><i>Keen Smell.</i></b> Skritch has advantage on Wisdom (Perception) checks that rely on smell.</p>
+    <p><b><i>King of Rats.</i></b> Rats and rat swarms within 30 feet of Skritch have advantage on attack rolls.</p>
+    <p style="color:#7a1f12;font-variant:small-caps;font-size:13pt;border-bottom:1px solid #9c2b1b">Actions</p>
+    <p><b><i>Multiattack (Human Form Only).</i></b> Skritch makes two attacks, only one of which can be a bite.</p>
+    <p><b><i>Bite (Rat Form Only).</i></b> <i>Melee Weapon Attack:</i> +4 to hit, reach 5 ft., one target. <i>Hit:</i> 4 (1d4 + 2) piercing damage. If the target is a humanoid, it must succeed on a DC 11 Constitution saving throw or be cursed with wererat lycanthropy.</p>
+    <p><b><i>Rusty Scepter (Human Form Only).</i></b> <i>Melee Weapon Attack:</i> +4 to hit, reach 5 ft., one target. <i>Hit:</i> 5 (1d6 + 2) bludgeoning damage.</p>
+    <p style="color:#7a1f12;font-variant:small-caps;font-size:13pt;border-bottom:1px solid #9c2b1b">Reactions</p>
+    <p><b><i>Rat Shield.</i></b> When a creature Skritch can see hits him with an attack, he causes an adjacent rat or rat swarm to take the hit instead.</p>
+  </div>
+  <p>Skritch was a pickpocket in Bramblecross until a wererat bit him in the sewers. Instead of seeking a cure, he decided that the rats made him royalty. He speaks in a grand, wheedling voice, refers to himself as "We," and fidgets constantly with his spoon crown.</p>
+</div>
+
+<div class="page two">
+  <h2>Appendix: Creatures and Magic</h2>
+  <div class="sb">
+    <h4>Swarm of Cellar Rats</h4>
+    <i>Medium swarm of Tiny beasts, unaligned</i><hr>
+    <b>Armor Class</b> 10<br><b>Hit Points</b> 22 (5d8)<br><b>Speed</b> 30 ft., climb 20 ft.<hr>
+    <div class="abil"><div><b>STR</b><br>9 (-1)</div><div><b>DEX</b><br>11 (+0)</div><div><b>CON</b><br>10 (+0)</div><div><b>INT</b><br>2 (-4)</div><div><b>WIS</b><br>10 (+0)</div><div><b>CHA</b><br>3 (-4)</div></div><hr>
+    <b>Damage Resistances</b> bludgeoning, piercing, slashing<br><b>Condition Immunities</b> charmed, frightened, grappled, paralyzed, petrified, prone, restrained, stunned<br><b>Senses</b> darkvision 30 ft., passive Perception 10<br><b>Languages</b> —<br><b>Challenge</b> 1/4 (50 XP)<hr>
+    <p><b><i>Beer-Soaked.</i></b> The swarm reeks of stolen ale. It has disadvantage on Dexterity saving throws.</p>
+    <p><b><i>Swarm.</i></b> The swarm can occupy another creature's space and vice versa, and can move through any opening large enough for a Tiny rat. It can't regain hit points or gain temporary hit points.</p>
+    <p><b><i>Bites.</i></b> <i>Melee Weapon Attack:</i> +2 to hit, reach 0 ft., one target in the swarm's space. <i>Hit:</i> 7 (2d6) piercing damage, or 3 (1d6) piercing damage if the swarm has half of its hit points or fewer.</p>
+  </div>
+  <h3>Ever-Full Tankard</h3>
+  <p><i>Wondrous item, uncommon</i></p>
+  <p>This dented pewter tankard is engraved with a grinning gnoll. As an action, you can speak the command word ("Grumble!") to fill it with a pint of decent ale or fresh water. Once per day, you can instead fill it with a frothing golden brew. A creature that drinks the golden brew regains 2d4 + 2 hit points and has advantage on saving throws against being frightened for 1 hour.</p>
+  <h3>From Grukk's Old Notebook</h3>
+  <p>Grukk kept notes from his adventuring days, written using the rules of a much older edition. If the party lingers in the tunnels, a <b>giant cave weevil</b> may burrow out of the wall:</p>
+  <div class="old">GIANT CAVE WEEVIL<br>FREQUENCY: Uncommon<br>NO. APPEARING: 1-2<br>ARMOR CLASS: 4<br>MOVE: 6", burrow 3"<br>HIT DICE: 3+1<br>% IN LAIR: 20%<br>NO. OF ATTACKS: 1<br>DAMAGE/ATTACK: 2-8<br>SPECIAL ATTACKS: Acid spit 1/day (10' range, 2d4, save vs. breath for half)<br>SPECIAL DEFENSES: Nil<br>MAGIC RESISTANCE: Standard<br>INTELLIGENCE: Non-<br>ALIGNMENT: Neutral<br>SIZE: S (3' long)<br>THAC0: 16</div>
+  <h3>Region Map</h3>
+  <p>The map on the next page shows Bramblecross and the Mirewood for DMs who want to continue the adventure. Each hex is 1 mile.</p>
+</div>
+
+<div class="page">
+  <h2>Map: Bramblecross and the Mirewood</h2>
+  <canvas id="region" width="960" height="760"></canvas>
+  <p class="center"><i>One hex = 1 mile.</i></p>
+</div>
+
+<script>
+// ---- Cellar map (square grid, 5 ft squares) ----
+(function () {
+  const c = document.getElementById("cellar").getContext("2d"), S = 40, W = 24, H = 18;
+  c.fillStyle = "#3a332c"; c.fillRect(0, 0, W * S, H * S);
+  const floor = (x, y, w, h) => { c.fillStyle = "#e4dccb"; c.fillRect(x * S, y * S, w * S, h * S); };
+  const rooms = [
+    [1, 2, 6, 5, "1"], [1, 10, 5, 5, "2"], [17, 2, 6, 5, "4"], [9, 11, 5, 4, "5"], [16, 10, 7, 7, "6"],
+  ];
+  rooms.forEach(([x, y, w, h]) => floor(x, y, w, h));
+  // corridors
+  floor(7, 4, 10, 1);  // 3. old tunnel from 1 to 4
+  floor(3, 7, 1, 3);   // 1 -> 2
+  floor(14, 5, 1, 7);  // tunnel down to flooded passage
+  floor(6, 12, 3, 1);  // 2 -> 5
+  floor(14, 12, 2, 1); // 5 -> 6 (main way)
+  floor(19, 7, 1, 3);  // 4 -> 6 guarded way
+  // water in 5
+  c.fillStyle = "rgba(60,110,150,0.55)"; c.fillRect(9 * S, 11 * S, 5 * S, 4 * S); c.fillRect(14 * S, 5 * S, S, 7 * S);
+  // grid
+  c.strokeStyle = "rgba(0,0,0,0.25)"; c.lineWidth = 1;
+  for (let x = 0; x <= W; x++) { c.beginPath(); c.moveTo(x * S, 0); c.lineTo(x * S, H * S); c.stroke(); }
+  for (let y = 0; y <= H; y++) { c.beginPath(); c.moveTo(0, y * S); c.lineTo(W * S, y * S); c.stroke(); }
+  // doors
+  const door = (x, y, horiz, label) => {
+    c.fillStyle = label === "S" ? "#7a3fb0" : "#7a4a24";
+    if (horiz) c.fillRect(x * S + 4, y * S + S / 2 - 5, S - 8, 10); else c.fillRect(x * S + S / 2 - 5, y * S + 4, 10, S - 8);
+    if (label) { c.fillStyle = "#fff"; c.font = "bold 16px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(label, x * S + S / 2, y * S + S / 2); }
+  };
+  door(3, 7, true); door(19, 9, true); door(14, 11, false, "S");
+  // trap marker in tunnel
+  c.fillStyle = "#b5432c"; c.font = "bold 22px Georgia"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("T", 10.5 * S, 4.5 * S);
+  c.fillStyle = "#7a1f12"; c.font = "bold 30px Georgia";
+  rooms.forEach(([x, y, w, h, l]) => c.fillText(l, (x + w / 2) * S, (y + h / 2) * S));
+  c.font = "bold 22px Georgia"; c.fillText("3", 13.5 * S, 4.5 * S);
+  // trapdoor
+  c.strokeStyle = "#7a4a24"; c.lineWidth = 3; c.strokeRect(2 * S + 6, 3 * S + 6, S - 12, S - 12);
+  c.font = "12px sans-serif"; c.fillStyle = "#333"; c.fillText("up", 2.5 * S, 2.5 * S);
+  // throne
+  c.fillStyle = "#8a6a3a"; c.fillRect(21 * S, 12 * S, S, 2 * S);
+})();
+
+// ---- Region map (pointy-top hexes) ----
+(function () {
+  const c = document.getElementById("region").getContext("2d"), R = 32, w = Math.sqrt(3) * R;
+  c.fillStyle = "#f3ead2"; c.fillRect(0, 0, 960, 760);
+  const terrain = (col, row) => {
+    if (row >= 3 && row <= 8 && col >= 9 && col <= 15) return "#5f8a4f"; // Mirewood
+    if (col === 6 || (col === 7 && row % 2)) return "#7fb0d0";            // river
+    if (row <= 1 && col >= 10) return "#a99a86";                          // hills
+    return "#d9cfa0";                                                      // farmland
+  };
+  for (let row = 0; row < 16; row++) for (let col = 0; col < 18; col++) {
+    const cx = w * col + (row % 2 ? w / 2 : 0) + 20, cy = R * 1.5 * row + 30;
+    c.beginPath();
+    for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i - Math.PI / 6; const x = cx + R * Math.cos(a), y = cy + R * Math.sin(a); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+    c.closePath(); c.fillStyle = terrain(col, row); c.fill(); c.strokeStyle = "rgba(0,0,0,0.35)"; c.stroke();
+  }
+  c.fillStyle = "#7a1f12"; c.font = "bold 20px Georgia"; c.textAlign = "center";
+  c.fillText("★ Bramblecross", 5 * w + 30, 6 * R * 1.5 + 36);
+  c.fillText("THE MIREWOOD", 12 * w + 20, 5.5 * R * 1.5 + 36);
+  c.fillText("Greyback Hills", 14 * w, 0.5 * R * 1.5 + 36);
+  c.font = "italic 16px Georgia"; c.fillText("River Bramble", 6.5 * w + 20, 12 * R * 1.5 + 30);
+})();
+</script>
+</body></html>
