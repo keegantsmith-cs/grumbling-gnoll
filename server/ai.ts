@@ -62,6 +62,7 @@ export interface CampaignContext {
   rulesVersion: string;
   dmNotes: string;
   party: string; // short summary of the player characters
+  adventure?: string; // the adventure the party is playing, if any
 }
 
 function campaignSystem(ctx: CampaignContext): Anthropic.Beta.BetaTextBlockParam[] {
@@ -70,7 +71,7 @@ function campaignSystem(ctx: CampaignContext): Anthropic.Beta.BetaTextBlockParam
     { type: "text", text: BASE_SYSTEM },
     {
       type: "text",
-      text: `Campaign: ${ctx.name}\nRules: D&D 5th Edition (${ctx.rulesVersion} rules)\n\nThe party:\n${ctx.party || "(no approved characters yet)"}\n\nDM's private campaign notes (world, lore, NPCs met so far, recent events):\n${ctx.dmNotes || "(none yet)"}`,
+      text: `Campaign: ${ctx.name}\nRules: D&D 5th Edition (${ctx.rulesVersion} rules)\n\nThe party:\n${ctx.party || "(no approved characters yet)"}\n\nDM's private campaign notes (world, lore, NPCs met so far, recent events):\n${ctx.dmNotes || "(none yet)"}${ctx.adventure ? `\n\n${ctx.adventure}` : ""}`,
       cache_control: { type: "ephemeral" },
     },
   ];
@@ -470,6 +471,94 @@ export async function characterArtPrompt(campaignId: number | null, userId: numb
     checkStop(msg);
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
     logUsage(campaignId, userId, "art-prompt", c.name, text, msg.usage);
+    return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}
+
+// ---------- Reading adventure modules ----------
+
+const AdventureChunkSchema = z.object({
+  sections: z.array(z.object({
+    title: z.string(),
+    continues_previous: z.boolean(),
+    page_start: z.number(),
+    page_end: z.number(),
+    summary: z.string(),
+    dm_notes: z.string(),
+    read_aloud: z.string(),
+  })),
+  npcs: z.array(z.object({ name: z.string(), role: z.string(), description: z.string(), where: z.string() })),
+  monsters: z.array(MonsterSchema),
+  items: z.array(ItemSchema),
+});
+export type AdventureChunk = z.infer<typeof AdventureChunkSchema>;
+
+export async function readAdventureChunk(opts: {
+  campaignId: number; userId: number; pdfBase64: string; pageLabel: string; edition: string; targetRules: string; title: string; previousTitles: string[];
+}): Promise<AdventureChunk> {
+  const anthropic = getClient();
+  const is5e = /^5e/i.test(opts.edition);
+  try {
+    const stream = anthropic.beta.messages.stream({
+      model: AI_MODEL,
+      max_tokens: 64000,
+      ...fallbackParams(),
+      output_config: { effort: "medium", format: betaZodOutputFormat(AdventureChunkSchema) },
+      system: `${BASE_SYSTEM}\n\nYou are preparing a DM's private run-guide for an adventure module they own, to be played with D&D 5th Edition (${opts.targetRules} rules).${is5e ? "" : `\n\nThe adventure was written for ${opts.edition}, so convert its monsters and items to 5e.\n\n${CONVERT_GUIDE}`}`,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: opts.pdfBase64 } },
+          {
+            type: "text",
+            text: `These are ${opts.pageLabel} of the adventure "${opts.title}" (${opts.edition}). They may be scans with OCR errors.
+${opts.previousTitles.length ? `Sections found so far (in order): ${opts.previousTitles.slice(-15).join(" | ")}` : "This is the start of the adventure."}
+
+Build the run-guide for these pages:
+- sections: the chapters/locations/scenes in reading order (keyed areas like "Area 12. The Crypt" can be grouped into one section per chapter or level if there are many). If the first section here continues the last one listed above, set continues_previous = true and reuse its title.
+  - summary: what happens here and why it matters, 2-5 sentences.
+  - dm_notes: Markdown bullets with what the DM needs at the table: key NPCs and their motives, creatures and numbers, traps/hazards with DCs (converted to 5e), treasure, clues, and where things lead next. Keep it tight.
+  - read_aloud: the most important boxed/read-aloud text, condensed, or "" if none.
+- npcs: named characters introduced on these pages (not ones only mentioned in passing).
+- monsters: ${is5e ? "only NEW or unique creatures with full stat blocks printed on these pages (skip standard Monster Manual creatures that are only referenced)" : "every creature with stats on these pages, converted to 5e"}.
+- items: magic items described on these pages${is5e ? "" : ", converted to 5e"}.
+Skip front matter, credits, ads, and the table of contents. Use empty lists when there's nothing.`,
+          },
+        ],
+      }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const parsed = AdventureChunkSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) throw new AIError("The AI's reading of those pages came back in an unexpected format.");
+    logUsage(opts.campaignId, opts.userId, "adventure", `${opts.title} ${opts.pageLabel}`, { sections: parsed.data.sections.length }, msg.usage);
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new AIError("The AI's reading came back incomplete. Retry and it will continue from where it stopped.");
+    friendlyError(e);
+  }
+}
+
+export async function adventureSynopsis(ctx: CampaignContext, userId: number, title: string, outline: string): Promise<string> {
+  const anthropic = getClient();
+  try {
+    const msg = await anthropic.beta.messages.create({
+      model: AI_MODEL,
+      max_tokens: 8000,
+      ...fallbackParams(),
+      output_config: { effort: "low" },
+      system: campaignSystem(ctx),
+      messages: [{
+        role: "user",
+        content: `Here is a section-by-section outline of the adventure "${title}" that the DM uploaded:\n\n${outline}\n\nWrite, in Markdown:\n## Overview\nThe adventure's premise, main villain(s) and their goal, and how it ends, in under 200 words.\n## Getting the party involved\n2-3 ways to hook THIS party into it, using the campaign notes where possible.\n## Things to prepare\nA short bullet list (recurring NPCs, big set-pieces, likely level range).`,
+      }],
+    });
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    logUsage(ctx.id, userId, "adventure-synopsis", title, text, msg.usage);
     return text;
   } catch (e) {
     friendlyError(e);

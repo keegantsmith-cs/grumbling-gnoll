@@ -4,6 +4,7 @@ A private D&D 5e virtual tabletop and community site for a small group (about 10
 
 - **Live table:** upload battle maps or generate them, square or hex grids, tokens, fog of war, measuring, pings, initiative tracker, chat, and server-side dice rolls (`/r 1d20+5`, advantage, secret DM rolls, whispers).
 - **Characters:** a full 5e sheet that does the math (modifiers, saves, skills, HP, multiclass spell slots, pact magic). New characters and edits need the **DM's approval**. HP and spell slots used during play don't.
+- **Adventures:** upload an adventure module's PDF and the AI builds a chapter-by-chapter run guide, adds its NPCs/monsters/items to the Compendium (converted to 5e if needed), and keeps the AI assistant aware of where the party is.
 - **Import paper sheets:** photograph a filled-in character sheet (or upload a PDF, including fillable ones) and the AI copies it onto a sheet on the site.
 - **Portraits:** upload a character picture (also used as the map token), or have the AI write a prompt for a free image generator.
 - **Discord:** dice rolls, turns, shared handouts and session reminders post to your Discord channel; DM alerts go to a private channel.

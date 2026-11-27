@@ -24,6 +24,7 @@ const entryOut = (e: any) => ({
   status: e.status,
   playerVisible: !!e.player_visible,
   uploadId: e.upload_id,
+  adventureId: e.adventure_id,
   createdAt: e.created_at,
 });
 
@@ -62,6 +63,19 @@ function loadEntry(entryId: number, userId: number) {
   campaignAccessById(e.campaign_id, userId, true);
   return e;
 }
+
+// Approve every draft at once (optionally only those from one adventure or PDF)
+compendiumRoutes.post("/campaigns/:id/compendium/approve-all", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const adv = req.body?.adventureId ? Number(req.body.adventureId) : null;
+  const up = req.body?.uploadId ? Number(req.body.uploadId) : null;
+  const r = run(
+    `UPDATE compendium SET status = 'approved' WHERE campaign_id = ? AND status = 'draft'${adv ? " AND adventure_id = ?" : ""}${up ? " AND upload_id = ?" : ""}`,
+    ...[id, adv, up].filter((v) => v != null),
+  );
+  notify(id, "compendium");
+  res.json({ approved: r.changes });
+});
 
 compendiumRoutes.patch("/compendium/:entryId", (req, res) => {
   const e = loadEntry(num(req.params.entryId), req.user!.id);

@@ -31,7 +31,7 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
         </select>}
       </div>
       <p className="muted">{campaign.isDM ? "Monsters, items, NPCs and notes for this campaign. Players only see entries you mark \"Players can see\"." : "Things your DM has shared with the party."}</p>
-      {campaign.isDM && drafts > 0 && <div className="notice">{drafts} converted entr{drafts === 1 ? "y is" : "ies are"} waiting for review. <button className="link" onClick={() => setOnlyDrafts(true)}>Show drafts</button></div>}
+      {campaign.isDM && drafts > 0 && <div className="notice">{drafts} converted entr{drafts === 1 ? "y is" : "ies are"} waiting for review. <button className="link" onClick={() => setOnlyDrafts(true)}>Show drafts</button>{" · "}<button className="link" onClick={() => confirm(`Approve all ${drafts} drafts without reviewing each one?`) && api.post(`/campaigns/${campaign.id}/compendium/approve-all`, {}).then(() => { list.reload(); toast("All drafts approved"); })}>Approve all</button></div>}
       {newKind && <EntryEditor campaign={campaign} entry={{ kind: newKind, name: "", data: blankData(newKind), status: "approved", playerVisible: false }} close={() => { setNewKind(null); list.reload(); }} />}
       <div className="row" style={{ marginBottom: 10 }}>
         <input className="grow" placeholder="Search..." value={q} onChange={(e) => setQ(e.target.value)} />

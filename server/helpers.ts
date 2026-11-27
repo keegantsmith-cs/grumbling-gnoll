@@ -43,7 +43,7 @@ export function campaignContext(campaignId: number): CampaignContext {
       return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}`;
     })
     .join("\n");
-  return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: c.dm_notes, party };
+  return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: c.dm_notes, party, adventure: adventureContext(campaignId) };
 }
 
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
@@ -79,3 +79,13 @@ export const sheetUpload = multer({
   limits: { fileSize: 30 * 1024 * 1024, files: 8 },
   fileFilter: (_req, file, cb) => cb(null, /^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype) || file.mimetype === "application/pdf"),
 });
+
+/** What the AI should know about the adventure the party is playing. */
+function adventureContext(campaignId: number): string | undefined {
+  const a = one("SELECT * FROM adventures WHERE campaign_id = ? AND active = 1 AND status = 'done'", campaignId);
+  if (!a) return undefined;
+  const sections = all("SELECT id, title, summary, done FROM adventure_sections WHERE adventure_id = ? ORDER BY position", a.id);
+  const cur = sections.find((s) => s.id === a.current_section_id);
+  const outline = sections.map((s) => `${s.id === a.current_section_id ? "▶ " : s.done ? "✓ " : "- "}${s.title}`).join("\n");
+  return `The party is playing the adventure "${a.title}" (originally ${a.edition}).\n${a.synopsis.slice(0, 3000)}\n\nOutline (✓ done, ▶ current):\n${outline.slice(0, 4000)}${cur ? `\n\nCurrent section, "${cur.title}": ${cur.summary}` : ""}`;
+}

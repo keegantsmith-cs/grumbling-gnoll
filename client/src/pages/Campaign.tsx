@@ -9,6 +9,7 @@ import { Compendium } from "./Compendium";
 import { Assistant } from "./Assistant";
 import { Converter } from "./Converter";
 import { Settings } from "./Settings";
+import { Adventures } from "./Adventures";
 
 export interface Campaign {
   id: number; name: string; description: string; rulesVersion: "2014" | "2024"; dmUserId: number; dmName: string;
@@ -38,7 +39,7 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
     ["table", "🎲 Table"],
     ["characters", "🧝 Characters"],
     ...(dm ? ([["approvals", "✅ Approvals", approvals.data?.length ?? 0]] as [string, string, number][]) : []),
-    ...(dm ? ([["maps", "🗺️ Maps"]] as [string, string][]) : []),
+    ...(dm ? ([["maps", "🗺️ Maps"], ["adventures", "📚 Adventures"]] as [string, string][]) : []),
     ["compendium", "📖 Compendium"],
     ...(dm ? ([["assistant", "🧙 AI Assistant"], ["convert", "🔄 Convert editions"]] as [string, string][]) : []),
     ["settings", dm ? "⚙️ Settings" : "ℹ️ About"],
@@ -65,6 +66,7 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
           {tab === "characters" && <CharactersTab campaign={campaign} changed={live.changed} openId={sub} roll={(expr, label) => live.socket?.emit("roll", { expr, label })} />}
           {tab === "approvals" && dm && <Approvals campaign={campaign} data={approvals.data} reload={approvals.reload} />}
           {tab === "maps" && dm && <MapsTab campaign={campaign} live={live} onChange={reload} />}
+          {tab === "adventures" && dm && <Adventures campaign={campaign} changed={live.changed} openId={sub} />}
           {tab === "compendium" && <Compendium campaign={campaign} changed={live.changed} />}
           {tab === "assistant" && dm && <Assistant campaign={campaign} />}
           {tab === "convert" && dm && <Converter campaign={campaign} changed={live.changed} />}

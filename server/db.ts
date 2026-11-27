@@ -195,3 +195,41 @@ addColumn("campaigns", "next_session_at", "TEXT"); // ISO time in UTC
 addColumn("campaigns", "session_note", "TEXT NOT NULL DEFAULT ''");
 addColumn("campaigns", "session_weekly", "INTEGER NOT NULL DEFAULT 0");
 addColumn("campaigns", "reminders_sent", "TEXT NOT NULL DEFAULT '[]'");
+
+// Adventures (published or homebrew modules the DM uploads)
+db.exec(`
+CREATE TABLE IF NOT EXISTS adventures (
+  id INTEGER PRIMARY KEY,
+  campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  path TEXT NOT NULL,
+  edition TEXT NOT NULL,
+  pages INTEGER NOT NULL,
+  page_from INTEGER NOT NULL,
+  page_to INTEGER NOT NULL,
+  next_page INTEGER,
+  status TEXT NOT NULL DEFAULT 'queued', -- queued | processing | done | error
+  progress TEXT NOT NULL DEFAULT '',
+  error TEXT,
+  synopsis TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 0,
+  current_section_id INTEGER,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS adventure_sections (
+  id INTEGER PRIMARY KEY,
+  adventure_id INTEGER NOT NULL REFERENCES adventures(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  page_start INTEGER,
+  page_end INTEGER,
+  summary TEXT NOT NULL DEFAULT '',
+  dm_notes TEXT NOT NULL DEFAULT '',
+  read_aloud TEXT NOT NULL DEFAULT '',
+  done INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sections_adv ON adventure_sections(adventure_id, position);
+`);
+addColumn("compendium", "adventure_id", "INTEGER");
