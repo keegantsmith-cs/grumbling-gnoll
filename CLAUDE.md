@@ -27,6 +27,10 @@ A private D&D 5e virtual tabletop for one DM (the owner, non-technical) and ~10 
 - GitHub Actions runs typecheck + tests + build on push.
 - Browser checks: Playwright is preinstalled (`require('playwright')`); start the server with `DATA_DIR=<scratch dir> PORT=<port> npx tsx server/index.ts`.
 
+## Helpers
+- `.claude/agents/website-designer.md`: a UI/UX designer agent. Ask for it by name ("use the website-designer agent to review the character sheet").
+- `docs-next-session.md`: starter message for new sessions.
+
 ## Conventions
 - Keep UI text friendly and non-technical. Dark tavern theme tokens in `client/src/styles.css`.
 - Commit messages describe the user-visible change.
