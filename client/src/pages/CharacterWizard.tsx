@@ -7,7 +7,7 @@ import {
 } from "../../../shared/character";
 import { ALIGNMENTS, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
 import {
-  BACKGROUND_ABILITIES_2024, BACKGROUND_SKILLS, CLASS_CREATION, POINT_BUY_BUDGET, POINT_BUY_COST, SPECIES_2014, SPEED_2024, STANDARD_ARRAY, subclassLevel,
+  BACKGROUND_ABILITIES_2024, BACKGROUND_SKILLS, CLASS_CREATION, POINT_BUY_BUDGET, POINT_BUY_COST, SPECIES_2014, STANDARD_ARRAY, asiLevels, classSkillChoices, speciesSpeed, subclassLevel,
 } from "../../../shared/creation";
 
 type Method = "roll" | "array" | "pointbuy";
@@ -96,7 +96,8 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
   }
 
   const skillChoicesNeeded = cc?.skillCount ?? 2;
-  const classSkillList = !cc ? SKILLS.map((s) => s.key) : cc.skills === "any" ? SKILLS.map((s) => s.key) : cc.skills;
+  const classSkills = classSkillChoices(cls, rules);
+  const classSkillList = !classSkills || classSkills === "any" ? SKILLS.map((s) => s.key) : classSkills;
   const chosenClassSkills = skills.filter((s) => !bgSkills.includes(s));
 
   const canNext = [
@@ -115,7 +116,7 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
   function buildCharacter(): CharacterData {
     const d = blankCharacter(rules);
     const abilities = Object.fromEntries(ABILITIES.map((a) => [a, finalScore(a)])) as Record<Ability, number>;
-    const speed = rules === "2014" ? sp2014?.speed ?? 30 : SPEED_2024[species.split(" ")[0]] ?? 30;
+    const speed = speciesSpeed(species, rules);
     const rolledHp = extraLevels > 0 && hpMode === "roll";
     const items = equipment.split(/\n|,/).map((s) => s.trim()).filter(Boolean);
     return {
@@ -133,7 +134,8 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
       personality, backstory,
       features: [
         sp2014?.note ?? "",
-        level >= 4 ? `Ability score improvements / feats from level ${[4, 8, 12, 16, 19].filter((l) => l <= level).join(", ")}: add these to your ability scores.` : "",
+        level >= 4 ? `Ability score improvements / feats from level ${asiLevels(cls, rules).filter((l) => l <= level).join(", ")}: add these to your ability scores.` : "",
+        rules === "2024" && level >= 19 ? "Level 19: choose an Epic Boon feat." : "",
         "Add your class and species features here (see the rulebook).",
       ].filter(Boolean).join("\n"),
     };

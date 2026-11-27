@@ -276,21 +276,24 @@ export function derive(c: CharacterData): Derived {
   }
   const maxHp = c.hp.max ?? Math.max(1, autoHp);
 
-  // Spell slots (multiclass rules). Single-class half casters round up; multiclass rounds down.
+  // Spell slots (multiclass rules). A single casting class uses its own table (half/third round up).
+  // Multiclassed: 2014 rounds half and third casters down; 2024 rounds half casters up, third casters down.
+  const is2024 = c.rulesVersion === "2024";
   let casterLevel = 0;
   const casting = c.classes.filter((cl) => ["full", "half", "third"].includes(casterTypeOf(cl)));
   for (const cl of casting) {
     const t = casterTypeOf(cl);
     const lv = Number(cl.level) || 0;
     if (t === "full") casterLevel += lv;
-    else if (t === "half") casterLevel += casting.length === 1 ? Math.ceil(lv / 2) : Math.floor(lv / 2);
+    else if (t === "half") casterLevel += casting.length === 1 || is2024 ? Math.ceil(lv / 2) : Math.floor(lv / 2);
     else if (t === "third") casterLevel += casting.length === 1 ? Math.ceil(lv / 3) : Math.floor(lv / 3);
   }
-  // A lone half-caster gets no slots at level 1; a lone third-caster gets none before level 3.
+  // A lone third-caster gets no slots before level 3. A lone half-caster gets none at level 1
+  // in 2014 (in 2024, Paladins and Rangers cast from level 1).
   if (casting.length === 1) {
     const t = casterTypeOf(casting[0]);
     const lv = Number(casting[0].level) || 0;
-    if ((t === "half" && lv < 2) || (t === "third" && lv < 3)) casterLevel = 0;
+    if ((t === "half" && lv < 2 && !is2024) || (t === "third" && lv < 3)) casterLevel = 0;
   }
   const row = casterLevel > 0 ? SLOT_TABLE[Math.min(20, casterLevel) - 1] : [];
   const spellSlots = Array.from({ length: 9 }, (_, i) => row[i] ?? 0);

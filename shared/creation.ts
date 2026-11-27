@@ -8,6 +8,8 @@ export const POINT_BUY_BUDGET = 27;
 export interface ClassCreation {
   skillCount: number;
   skills: string[] | "any";
+  /** Only where the 2024 list differs from the 2014 one. */
+  skills2024?: string[];
   primary: string;
   subclassLevel2014: number;
   gold2014: string; // starting wealth dice (x10 already applied by multiplier)
@@ -20,15 +22,28 @@ export const CLASS_CREATION: Record<string, ClassCreation> = {
   Bard: { skillCount: 3, skills: "any", primary: "Charisma", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 10, blurb: "A performer whose music is magic. Great at talking, helping allies and knowing a bit of everything." },
   Cleric: { skillCount: 2, skills: ["history", "insight", "medicine", "persuasion", "religion"], primary: "Wisdom", subclassLevel2014: 1, gold2014: "5d4", goldMultiplier: 10, blurb: "A priest who wields divine magic. The party's healer and protector, sturdy in a fight." },
   Druid: { skillCount: 2, skills: ["arcana", "animal_handling", "insight", "medicine", "nature", "perception", "religion", "survival"], primary: "Wisdom", subclassLevel2014: 2, gold2014: "2d4", goldMultiplier: 10, blurb: "A keeper of nature who casts primal spells and can turn into animals." },
-  Fighter: { skillCount: 2, skills: ["acrobatics", "animal_handling", "athletics", "history", "insight", "intimidation", "perception", "survival"], primary: "Strength or Dexterity", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 10, blurb: "A master of weapons and armor. Simple to play, very effective." },
+  Fighter: { skillCount: 2, skills: ["acrobatics", "animal_handling", "athletics", "history", "insight", "intimidation", "perception", "survival"], skills2024: ["acrobatics", "animal_handling", "athletics", "history", "insight", "intimidation", "perception", "persuasion", "survival"], primary: "Strength or Dexterity", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 10, blurb: "A master of weapons and armor. Simple to play, very effective." },
   Monk: { skillCount: 2, skills: ["acrobatics", "athletics", "history", "insight", "religion", "stealth"], primary: "Dexterity and Wisdom", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 1, blurb: "A martial artist who fights unarmed with speed and focus." },
   Paladin: { skillCount: 2, skills: ["athletics", "insight", "intimidation", "medicine", "persuasion", "religion"], primary: "Strength and Charisma", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 10, blurb: "A holy knight bound by an oath. Heavy armor, healing, and smiting foes." },
   Ranger: { skillCount: 3, skills: ["animal_handling", "athletics", "insight", "investigation", "nature", "perception", "stealth", "survival"], primary: "Dexterity and Wisdom", subclassLevel2014: 3, gold2014: "5d4", goldMultiplier: 10, blurb: "A hunter and tracker of the wilds, deadly with a bow, with a little nature magic." },
-  Rogue: { skillCount: 4, skills: ["acrobatics", "athletics", "deception", "insight", "intimidation", "investigation", "perception", "performance", "persuasion", "sleight_of_hand", "stealth"], primary: "Dexterity", subclassLevel2014: 3, gold2014: "4d4", goldMultiplier: 10, blurb: "A sneaky expert: locks, traps, stealth, and big sneak-attack damage." },
+  Rogue: { skillCount: 4, skills: ["acrobatics", "athletics", "deception", "insight", "intimidation", "investigation", "perception", "performance", "persuasion", "sleight_of_hand", "stealth"], skills2024: ["acrobatics", "athletics", "deception", "insight", "intimidation", "investigation", "perception", "persuasion", "sleight_of_hand", "stealth"], primary: "Dexterity", subclassLevel2014: 3, gold2014: "4d4", goldMultiplier: 10, blurb: "A sneaky expert: locks, traps, stealth, and big sneak-attack damage." },
   Sorcerer: { skillCount: 2, skills: ["arcana", "deception", "insight", "intimidation", "persuasion", "religion"], primary: "Charisma", subclassLevel2014: 1, gold2014: "3d4", goldMultiplier: 10, blurb: "Born with magic in the blood. Fewer spells than a wizard, but can bend them." },
   Warlock: { skillCount: 2, skills: ["arcana", "deception", "history", "intimidation", "investigation", "nature", "religion"], primary: "Charisma", subclassLevel2014: 1, gold2014: "4d4", goldMultiplier: 10, blurb: "Made a pact with a powerful being for magic. Eldritch Blast and spooky tricks." },
-  Wizard: { skillCount: 2, skills: ["arcana", "history", "insight", "investigation", "medicine", "religion"], primary: "Intelligence", subclassLevel2014: 2, gold2014: "4d4", goldMultiplier: 10, blurb: "A scholar of magic with the biggest spell list. Fragile but powerful." },
+  Wizard: { skillCount: 2, skills: ["arcana", "history", "insight", "investigation", "medicine", "religion"], skills2024: ["arcana", "history", "insight", "investigation", "medicine", "nature", "religion"], primary: "Intelligence", subclassLevel2014: 2, gold2014: "4d4", goldMultiplier: 10, blurb: "A scholar of magic with the biggest spell list. Fragile but powerful." },
 };
+
+/** The skills a class may choose from at 1st level ("any" = every skill). */
+export function classSkillChoices(className: string, rules: RulesVersion): string[] | "any" | undefined {
+  const cc = CLASS_CREATION[className];
+  if (!cc) return undefined;
+  return rules === "2024" && cc.skills2024 ? cc.skills2024 : cc.skills;
+}
+
+/** Levels that give an Ability Score Improvement (or feat). In 2024, level 19 is an Epic Boon instead. */
+export function asiLevels(className: string, rules: RulesVersion): number[] {
+  const base = className === "Fighter" ? [4, 6, 8, 12, 14, 16, 19] : className === "Rogue" ? [4, 8, 10, 12, 16, 19] : [4, 8, 12, 16, 19];
+  return rules === "2024" ? base.filter((l) => l !== 19) : base;
+}
 
 export function subclassLevel(className: string, rules: RulesVersion) {
   if (rules === "2024") return 3;
@@ -81,7 +96,26 @@ export const SPECIES_2014: Record<string, SpeciesInfo> = {
   Tiefling: { bonuses: { cha: 2, int: 1 }, speed: 30 },
 };
 
-export const SPEED_2024: Record<string, number> = { Dwarf: 30, Goliath: 35 };
+export const SPEED_2024: Record<string, number> = { Dwarf: 30, Goliath: 35, "Elf (Wood Elf)": 35 };
+
+/** Walking speed for a species name from the dropdown (30 ft. if unknown). */
+export function speciesSpeed(species: string, rules: RulesVersion): number {
+  if (rules === "2014") return SPECIES_2014[species]?.speed ?? 30;
+  return SPEED_2024[species] ?? SPEED_2024[species.split(" ")[0]] ?? 30;
+}
+
+/** Default darkvision range in feet from the species name, or null if it has none (or we don't know it). */
+export function speciesDarkvision(species: string, rules: RulesVersion): number | null {
+  const s = species.toLowerCase();
+  if (rules === "2024") {
+    if (/drow|dwarf|\borc\b/.test(s) && !/half-orc/.test(s)) return 120;
+    if (/elf|gnome|tiefling|dragonborn|aasimar|half-orc/.test(s)) return 60;
+    return null;
+  }
+  if (/drow/.test(s)) return 120;
+  if (/dwarf|elf|gnome|orc|tiefling/.test(s)) return 60; // includes Half-Elf, Half-Orc; Dragonborn has none in 2014
+  return null;
+}
 
 export function averageHpPerLevel(hitDie: number) {
   return hitDie / 2 + 1;

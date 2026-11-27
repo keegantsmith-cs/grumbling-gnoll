@@ -38,6 +38,8 @@ export function normalize(expr: string): string {
 export function rollDice(expr: string, rng: () => number = Math.random): RollResult {
   const e = normalize(expr);
   if (!e) throw new Error("Empty dice expression");
+  // "1d20 5" must not silently become "1d205"
+  if (/\d\s+\d/.test(expr)) throw new Error(`Missing + or - in "${expr}"`);
   const tokenRe = /([+-]?)(?:(\d*)d(\d+)(?:(kh|kl|dh|dl|k|d)(\d+))?|(\d+))/gy;
   const parts: (DieGroup | Modifier)[] = [];
   let pos = 0;

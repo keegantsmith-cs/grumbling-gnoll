@@ -534,10 +534,11 @@ export function averageHp(expr: string, fallback: number) {
 /** Movement, senses and attack ranges pulled from a stat block, for the range rings. */
 export function monsterMeta(m: Row) {
   const speed = String(m.speed ?? "");
-  const walk = Number(speed.match(/^(\d+)\s*ft/)?.[1] ?? speed.match(/walk\s*(\d+)/)?.[1] ?? 30);
-  const other = [...speed.matchAll(/(fly|swim|climb|burrow)\s*(\d+)/g)].map((x) => ({ kind: x[1], feet: Number(x[2]) }));
+  // Creatures that only swim or fly (e.g. "swim 40 ft.") have no walking speed
+  const walk = Number(speed.match(/^\s*(\d+)\s*ft/i)?.[1] ?? speed.match(/walk\s*(\d+)/i)?.[1] ?? (/(fly|swim|climb|burrow)\s*\d+/i.test(speed) ? 0 : 30));
+  const other = [...speed.matchAll(/(fly|swim|climb|burrow)\s*(\d+)/gi)].map((x) => ({ kind: x[1].toLowerCase(), feet: Number(x[2]) }));
   const senses = String(m.senses ?? "");
-  const vision = [...senses.matchAll(/(darkvision|blindsight|tremorsense|truesight)\s*(\d+)/g)].map((x) => ({ kind: x[1], feet: Number(x[2]) }));
+  const vision = [...senses.matchAll(/(darkvision|blindsight|tremorsense|truesight)\s*(\d+)/gi)].map((x) => ({ kind: x[1].toLowerCase(), feet: Number(x[2]) }));
   const attacks: { name: string; reach?: number; normal?: number; long?: number }[] = [];
   for (const a of [...(m.actions ?? []), ...(m.bonus_actions ?? [])] as { name: string; description: string }[]) {
     const d = String(a.description ?? "");

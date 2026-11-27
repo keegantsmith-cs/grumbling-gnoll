@@ -245,7 +245,7 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
     if (b.hp.current !== undefined) data.hp.current = Math.max(0, Math.round(Number(b.hp.current)) || 0);
     if (b.hp.temp !== undefined) data.hp.temp = Math.max(0, Number(b.hp.temp) || 0);
   }
-  if (b.deathSaves) data.deathSaves = { successes: Math.min(3, Number(b.deathSaves.successes) || 0), failures: Math.min(3, Number(b.deathSaves.failures) || 0) };
+  if (b.deathSaves) data.deathSaves = { successes: Math.max(0, Math.min(3, Number(b.deathSaves.successes) || 0)), failures: Math.max(0, Math.min(3, Number(b.deathSaves.failures) || 0)) };
   if (Array.isArray(b.spellSlotsUsed)) data.spellSlotsUsed = b.spellSlotsUsed.slice(0, 9).map((n: unknown) => Math.max(0, Number(n) || 0));
   if (b.pactSlotsUsed !== undefined) data.pactSlotsUsed = Math.max(0, Number(b.pactSlotsUsed) || 0);
   if (b.inspiration !== undefined) data.inspiration = !!b.inspiration;

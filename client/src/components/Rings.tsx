@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Circle, Group, Line, Text } from "react-konva";
 import { api } from "../api";
 import type { CampaignSocket, MapState, Ring, Token } from "../socket";
+import { speciesDarkvision } from "../../../shared/creation";
 
 const COLORS = { move: "#5cb85c", dash: "#9bd38f", reach: "#d9534f", ranged: "#e0a030", long: "#b07a1c", spell: "#a77ad6", sight: "#5b9cf0", custom: "#e3b866" };
 export const feetToPx = (map: MapState, feet: number) => (feet / (map.feetPerCell || 5)) * map.gridSize;
@@ -76,8 +77,10 @@ function usePresets(t: Token) {
   return useMemo(() => {
     const out: Ring[] = [];
     const speed = char?.speed ?? t.meta?.speed ?? 30;
-    out.push({ label: "Move", feet: speed, color: COLORS.move, kind: "ring" });
-    out.push({ label: "Dash", feet: speed * 2, color: COLORS.dash, kind: "ring" });
+    if (speed > 0) {
+      out.push({ label: "Move", feet: speed, color: COLORS.move, kind: "ring" });
+      out.push({ label: "Dash", feet: speed * 2, color: COLORS.dash, kind: "ring" });
+    }
     for (const s of t.meta?.otherSpeeds ?? []) out.push({ label: s.kind[0].toUpperCase() + s.kind.slice(1), feet: s.feet, color: COLORS.move, kind: "ring" });
     if (char) {
       const reachWeapon = (char.attacks ?? []).some((a: any) => /reach/i.test(a.notes ?? ""));
@@ -90,7 +93,7 @@ function usePresets(t: Token) {
       for (const sp of char.spells ?? []) for (const f of ftIn(sp.notes ?? "").slice(0, 1)) if (f > 5 && !spellRanges.has(f)) spellRanges.set(f, sp.name);
       for (const [f, name] of [...spellRanges.entries()].sort((a, b) => a[0] - b[0]).slice(0, 4)) out.push({ label: `${name} range`, feet: f, color: COLORS.spell, kind: "ring" });
       const dv = String(`${char.features ?? ""} ${char.species ?? ""}`).match(/darkvision\D{0,5}(\d+)/i)?.[1]
-        ?? (/(dwarf|elf|gnome|half-orc|half-elf|tiefling|drow|orc|dragonborn)/i.test(char.species ?? "") ? (/drow/i.test(char.species) ? "120" : "60") : null);
+        ?? speciesDarkvision(String(char.species ?? ""), char.rulesVersion === "2024" ? "2024" : "2014");
       if (dv) out.push({ label: "Darkvision", feet: Number(dv), color: COLORS.sight, kind: "ring" });
     } else {
       for (const a of t.meta?.attacks ?? []) {
