@@ -329,6 +329,20 @@ async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
   }
 }
 
+// The DM can hand a character to a player (e.g. a pregenerated hero, or one the DM built for them)
+characterRoutes.post("/characters/:id/owner", (req, res) => {
+  const { c, isDM } = loadCharacter(num(req.params.id), req.user!.id);
+  if (!c.campaign_id || !isDM) throw new HttpError(403, "Only the campaign's DM can change who plays a character");
+  const userId = num(req.body?.userId);
+  if (!campaignRole(c.campaign_id, userId)) throw new HttpError(400, "That person isn't in this campaign. Add them in Settings first.");
+  run("UPDATE characters SET owner_id = ?, updated_at = datetime('now') WHERE id = ?", userId, c.id);
+  // Map tokens for this character follow the new player
+  run("UPDATE tokens SET controlled_by = ? WHERE character_id = ?", userId, c.id);
+  broadcastMap(c.campaign_id);
+  notify(c.campaign_id, "characters");
+  res.json({ ok: true });
+});
+
 characterRoutes.delete("/characters/:id", (req, res) => {
   const { c } = loadCharacter(num(req.params.id), req.user!.id, true);
   run("DELETE FROM characters WHERE id = ?", c.id);

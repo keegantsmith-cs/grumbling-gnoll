@@ -19,6 +19,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
+  const campaignInfo = useLoad<any>(c?.isDM && c.campaignId ? `/campaigns/${c.campaignId}` : null, [c?.isDM, c?.campaignId]);
 
   useEffect(() => {
     if (c) {
@@ -66,7 +67,18 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
         {onDone && <button onClick={onDone}>← Back</button>}
       </div>
       <p className="muted">
-        Level {dv.level} {d.species} {classSummary(d)} · played by {c.ownerName}
+        Level {dv.level} {d.species} {classSummary(d)} · played by{" "}
+        {c.isDM && campaignInfo.data ? (
+          <select style={{ width: "auto", padding: "1px 6px" }} value={c.ownerId} title="Change who plays this character"
+            onChange={async (e) => {
+              const who = campaignInfo.data.members.find((m: any) => m.id === Number(e.target.value));
+              if (!confirm(`Give ${d.name} to ${who?.displayName}? They'll be able to edit it and move its token.`)) return;
+              try { await api.post(`/characters/${id}/owner`, { userId: Number(e.target.value) }); toast(`${d.name} now belongs to ${who?.displayName}`); reload(); }
+              catch (err) { toast((err as Error).message); }
+            }}>
+            {campaignInfo.data.members.map((m: any) => <option key={m.id} value={m.id}>{m.displayName}{m.role === "dm" ? " (DM)" : ""}</option>)}
+          </select>
+        ) : c.ownerName}
         {c.campaignName ? ` · ${c.campaignName}` : " · not in a campaign"} · {d.rulesVersion} rules
       </p>
       {c.pending && <div className="notice">Changes submitted {c.pending.createdAt} are waiting for the DM. You're editing that version; saving again replaces it.{c.pending.note && <div style={{ marginTop: 4 }}><i>{c.pending.note}</i></div>}</div>}
