@@ -69,6 +69,8 @@ function tokenOut(t: Row) {
     hp: t.hp,
     maxHp: t.max_hp,
     conditions: t.conditions,
+    rings: parseJSON(t.rings, []),
+    meta: parseJSON(t.meta, {}),
   };
 }
 
@@ -294,6 +296,15 @@ export function initRealtime(server: HttpServer) {
       const fields: Record<string, unknown> = {};
       if (p.hp !== undefined) fields.hp = p.hp === null || p.hp === "" ? null : Number(p.hp);
       if (p.conditions !== undefined) fields.conditions = String(p.conditions).slice(0, 200);
+      // Range rings (movement, reach, spell ranges, sight...) can be set by whoever controls the token
+      if (Array.isArray(p.rings)) {
+        fields.rings = JSON.stringify(p.rings.slice(0, 10).map((r: Row) => ({
+          label: String(r.label ?? "").slice(0, 40),
+          feet: Math.max(1, Math.min(2000, Math.round(Number(r.feet) || 5))),
+          color: /^#[0-9a-f]{6}$/i.test(String(r.color)) ? r.color : "#e3b866",
+          kind: r.kind === "sight" ? "sight" : "ring",
+        })));
+      }
       if (d.isDM) {
         if (p.name !== undefined) fields.name = String(p.name).slice(0, 60);
         if (p.size !== undefined) fields.size = Math.min(6, Math.max(0.25, Number(p.size) || 1));
@@ -420,6 +431,7 @@ function presence(campaignId: number) {
 // ---------- one-click monsters onto the map ----------
 
 export interface MonsterDrop {
+  meta?: Record<string, unknown>;
   name: string; count: number; hitPoints: number; hitDice?: string; rollHp?: boolean; size?: number; color?: string;
   hidden?: boolean; initiative?: "none" | "each" | "group"; dexMod?: number; x?: number; y?: number; imageUrl?: string | null;
 }
@@ -454,8 +466,8 @@ export function addMonsterTokens(campaignId: number, userId: number, m: MonsterD
     const snapTo = (v: number, off: number) => (Math.round(size) % 2 === 0 ? Math.round((v - off) / g) * g + off : Math.floor((v - off) / g) * g + off + g / 2);
     const x = snapTo(x0 + (i % perRow) * step, map.grid_offset_x || 0), y = snapTo(y0 + Math.floor(i / perRow) * step, map.grid_offset_y || 0);
     const r = run(
-      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp,
+      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp, JSON.stringify(m.meta ?? {}),
     );
     if (m.initiative && m.initiative !== "none") {
       const init = groupInit ?? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total;
@@ -477,4 +489,21 @@ export function averageHp(expr: string, fallback: number) {
   const m = String(expr ?? "").replace(/\s/g, "").match(/^(\d+)d(\d+)([+-]\d+)?$/);
   if (!m) return fallback;
   return Math.floor(Number(m[1]) * (Number(m[2]) + 1) / 2) + Number(m[3] ?? 0);
+}
+
+/** Movement, senses and attack ranges pulled from a stat block, for the range rings. */
+export function monsterMeta(m: Row) {
+  const speed = String(m.speed ?? "");
+  const walk = Number(speed.match(/^(\d+)\s*ft/)?.[1] ?? speed.match(/walk\s*(\d+)/)?.[1] ?? 30);
+  const other = [...speed.matchAll(/(fly|swim|climb|burrow)\s*(\d+)/g)].map((x) => ({ kind: x[1], feet: Number(x[2]) }));
+  const senses = String(m.senses ?? "");
+  const vision = [...senses.matchAll(/(darkvision|blindsight|tremorsense|truesight)\s*(\d+)/g)].map((x) => ({ kind: x[1], feet: Number(x[2]) }));
+  const attacks: { name: string; reach?: number; normal?: number; long?: number }[] = [];
+  for (const a of [...(m.actions ?? []), ...(m.bonus_actions ?? [])] as { name: string; description: string }[]) {
+    const d = String(a.description ?? "");
+    const reach = d.match(/reach\s*(\d+)\s*ft/);
+    const range = d.match(/range\s*(\d+)(?:\/(\d+))?\s*ft/);
+    if (reach || range) attacks.push({ name: a.name, reach: reach ? Number(reach[1]) : undefined, normal: range ? Number(range[1]) : undefined, long: range?.[2] ? Number(range[2]) : undefined });
+  }
+  return { speed: walk, otherSpeeds: other, vision, attacks: attacks.slice(0, 6) };
 }

@@ -5,7 +5,9 @@ import { announceRoll } from "./components/DiceTray";
 export interface Token {
   id: number; name: string; x: number; y: number; size: number; color: string; imageUrl: string | null;
   characterId: number | null; controlledBy: number | null; hidden: boolean; hp: number | null; maxHp: number | null; conditions: string;
+  rings: Ring[]; meta: { speed?: number; otherSpeeds?: { kind: string; feet: number }[]; vision?: { kind: string; feet: number }[]; attacks?: { name: string; reach?: number; normal?: number; long?: number }[] };
 }
+export interface Ring { label: string; feet: number; color: string; kind: "ring" | "sight" }
 export interface FogShape { mode: "reveal" | "hide"; kind: "circle" | "rect" | "poly" | "all"; x: number; y: number; r: number; w: number; h: number; points?: number[] }
 export interface MapState {
   id: number; name: string; imageUrl: string | null; generated: any; width: number; height: number;

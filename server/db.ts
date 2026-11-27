@@ -310,3 +310,5 @@ CREATE TABLE IF NOT EXISTS session_recaps (
 `);
 addColumn("campaigns", "discord_invite", "TEXT NOT NULL DEFAULT ''");
 addColumn("campaigns", "discord_server_id", "TEXT NOT NULL DEFAULT ''");
+addColumn("tokens", "rings", "TEXT NOT NULL DEFAULT '[]'");
+addColumn("tokens", "meta", "TEXT NOT NULL DEFAULT '{}'");

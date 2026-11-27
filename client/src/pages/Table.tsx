@@ -11,6 +11,7 @@ import { InitiativePanel } from "../components/Initiative";
 import { PartyPanel } from "../components/Party";
 import { Markdown } from "../components/Markdown";
 import { MonsterDrop } from "../components/MonsterDrop";
+import { RingEditor, RingsLayer } from "../components/Rings";
 
 type Tool = "select" | "measure" | "ping" | "reveal" | "revealRect" | "hideRect";
 
@@ -172,6 +173,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           {image && <KImage name="bg" image={image} width={map.width} height={map.height} />}
           {generated && <KImage name="bg" image={generated} width={map.width} height={map.height} />}
           <Shape listening={false} sceneFunc={(ctx) => drawGrid(ctx._context, map, view.scale)} />
+          <RingsLayer map={map} tokens={map.tokens} scale={view.scale} />
           {map.tokens.map((t) => (
             <TokenNode key={t.id} t={t} map={map} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
               onSelect={() => setSelected(t.id)}
@@ -202,7 +204,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
 
       {(sel || showAdd) && (
         <div className="token-panel card">
-          {sel ? <TokenEditor t={sel} isDM={isDM} canEdit={canControl(sel)} live={live} close={() => setSelected(null)} campaign={campaign} />
+          {sel ? <TokenEditor t={sel} isDM={isDM} canEdit={canControl(sel)} live={live} close={() => setSelected(null)} campaign={campaign} map={map} />
             : <AddToken map={map} view={view} size={size} isDM={isDM} campaign={campaign} live={live} close={() => setShowAdd(false)} />}
         </div>
       )}
@@ -282,7 +284,7 @@ function useOwnedCharacterIds(campaignId: number, me: number) {
   return ids;
 }
 
-function TokenEditor({ t, isDM, canEdit, live, close, campaign }: { t: Token; isDM: boolean; canEdit: boolean; live: CampaignSocket; close: () => void; campaign: Campaign }) {
+function TokenEditor({ t, isDM, canEdit, live, close, campaign, map }: { t: Token; isDM: boolean; canEdit: boolean; live: CampaignSocket; close: () => void; campaign: Campaign; map: MapState }) {
   const [f, setF] = useState(t);
   useEffect(() => setF(t), [t]);
   const save = (patch: Partial<Token>) => live.socket?.emit("token:update", { id: t.id, ...patch });
@@ -300,6 +302,10 @@ function TokenEditor({ t, isDM, canEdit, live, close, campaign }: { t: Token; is
           <div className="row" style={{ marginBottom: 8 }}>
             {[-10, -5, -1, 1, 5, 10].map((d) => <button key={d} className="small" onClick={() => save({ hp: (t.hp ?? 0) + d })}>{d > 0 ? `+${d}` : d}</button>)}
           </div>
+          <details open={(t.rings ?? []).length > 0} style={{ marginBottom: 8 }}>
+            <summary style={{ cursor: "pointer" }}>◎ Rings: movement, reach, ranges, sight</summary>
+            <div style={{ marginTop: 6 }}><RingEditor t={t} live={live} map={map} /></div>
+          </details>
           <label>Conditions<input value={f.conditions} placeholder="e.g. prone, poisoned" onChange={(e) => setF({ ...f, conditions: e.target.value })} onBlur={() => save({ conditions: f.conditions })} /></label>
           {isDM && (
             <>

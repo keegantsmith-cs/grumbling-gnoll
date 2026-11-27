@@ -2,7 +2,7 @@ import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, HttpError, imageUpload } from "../helpers.ts";
-import { addMonsterTokens, averageHp, broadcastMap, notify, sizeToCells } from "../realtime.ts";
+import { addMonsterTokens, averageHp, broadcastMap, monsterMeta, notify, sizeToCells } from "../realtime.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
@@ -197,7 +197,7 @@ campaignRoutes.post("/campaigns/:id/table/monsters", (req, res) => {
     const n = addMonsterTokens(id, req.user!.id, {
       name: String(b.name || m.name), count: Number(b.count) || 1, hitPoints: hp, hitDice: m.hit_dice, rollHp: !!b.rollHp,
       size: sizeToCells(m.size), hidden: !!b.hidden, initiative: b.initiative ?? "each", dexMod: Math.floor(((Number(m.dex) || 10) - 10) / 2),
-      x: b.x != null ? Number(b.x) : undefined, y: b.y != null ? Number(b.y) : undefined, color: b.color,
+      x: b.x != null ? Number(b.x) : undefined, y: b.y != null ? Number(b.y) : undefined, color: b.color, meta: monsterMeta(m),
     });
     res.json({ added: n });
   } catch (e) {
