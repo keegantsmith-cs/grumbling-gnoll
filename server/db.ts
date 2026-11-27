@@ -253,3 +253,16 @@ addColumn("ai_history", "model", "TEXT");
 addColumn("ai_history", "cost_usd", "REAL");
 // Older rows: estimate cost at Opus prices so this month's total isn't zero
 db.exec(`UPDATE ai_history SET cost_usd = (COALESCE(input_tokens,0) * 4 + COALESCE(output_tokens,0) * 20) / 1000000.0, model = COALESCE(model, 'claude-opus-5-5') WHERE cost_usd IS NULL`);
+
+// Dice rolled by the character creator, so the DM can see they were rolled fairly
+db.exec(`
+CREATE TABLE IF NOT EXISTS character_rolls (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL, -- abilities | hp | gold
+  result TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);

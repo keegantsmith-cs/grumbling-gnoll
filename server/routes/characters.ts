@@ -2,7 +2,8 @@ import { Router } from "express";
 import { all, one, parseJSON, run, type Row } from "../db.ts";
 import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
-import { notify, broadcastMap } from "../realtime.ts";
+import { notify, broadcastMap, postChat } from "../realtime.ts";
+import { describeRoll, rollDice } from "../../shared/dice.ts";
 import { aiEnabled, characterArtPrompt, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
@@ -145,10 +146,60 @@ characterRoutes.post("/characters", (req, res) => {
     autoApprove ? "approved" : "pending",
   );
   const id = Number(r.lastInsertRowid);
-  if (!autoApprove) submitChange(id, uid, "create", data, String(req.body?.note ?? ""));
+  const note = [String(req.body?.note ?? ""), rollSummary(uid, campaignId, req.body?.rollIds)].filter(Boolean).join("\n");
+  if (!autoApprove) submitChange(id, uid, "create", data, note);
   if (campaignId) notify(campaignId, "characters");
   res.json({ id });
 });
+
+// ---------- dice for the character creator (rolled here so nobody can fudge them) ----------
+const CREATOR_ROLLS: Record<string, (p: any) => { expr: string; times: number; label: string }> = {
+  abilities: () => ({ expr: "4d6dl1", times: 6, label: "ability scores (4d6, drop lowest)" }),
+  hp: (p) => {
+    const die = [6, 8, 10, 12].includes(Number(p.hitDie)) ? Number(p.hitDie) : 8;
+    const times = Math.max(1, Math.min(19, Math.round(Number(p.levels) || 1)));
+    return { expr: `1d${die}`, times, label: `hit points (${times} × d${die})` };
+  },
+  gold: (p) => {
+    const m = String(p.dice ?? "").match(/^([2-5])d4$/);
+    const mult = Number(p.multiplier) === 1 ? 1 : 10;
+    return { expr: m ? m[0] : "4d4", times: 1, label: `starting gold (${m ? m[0] : "4d4"}${mult === 10 ? " × 10" : ""})`, mult } as any;
+  },
+};
+
+characterRoutes.post("/characters/creator-roll", (req, res) => {
+  const uid = req.user!.id;
+  const kind = String(req.body?.kind ?? "");
+  const make = CREATOR_ROLLS[kind];
+  if (!make) throw new HttpError(400, "Unknown roll");
+  const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null;
+  if (campaignId && !campaignRole(campaignId, uid)) throw new HttpError(404, "Campaign not found");
+  const spec = make(req.body ?? {}) as { expr: string; times: number; label: string; mult?: number };
+  const rolls = Array.from({ length: spec.times }, () => rollDice(spec.expr));
+  let values = rolls.map((r) => r.total);
+  if (kind === "gold") values = [values[0] * (spec.mult ?? 10)];
+  const detail = rolls.map((r) => describeRoll(r)).join("; ");
+  const r = run("INSERT INTO character_rolls (user_id, campaign_id, kind, result) VALUES (?,?,?,?)", uid, campaignId, kind, JSON.stringify({ values, detail, label: spec.label }));
+  // Everyone at the table sees creation rolls, like rolling at a real table
+  if (campaignId) {
+    const total = kind === "abilities" ? values.join(", ") : String(values.reduce((a, b) => a + b, 0));
+    postChat(campaignId, uid, "roll", { expression: spec.expr + (spec.times > 1 ? ` ×${spec.times}` : ""), label: `Character creation: ${spec.label}`, total, detail });
+  }
+  const rollCount = one("SELECT COUNT(*) AS n FROM character_rolls WHERE user_id = ? AND kind = ? AND created_at >= datetime('now', '-1 day')", uid, kind)!.n;
+  res.json({ rollId: Number(r.lastInsertRowid), values, detail, rollCount });
+});
+
+function rollSummary(uid: number, campaignId: number | null, ids: unknown): string {
+  if (!Array.isArray(ids) || !ids.length) return "";
+  const rows = ids.slice(0, 10).map((id) => one("SELECT * FROM character_rolls WHERE id = ? AND user_id = ? AND used = 0", Number(id), uid)).filter(Boolean) as Row[];
+  const lines = rows.map((r) => {
+    const v = parseJSON<{ values: number[]; label: string }>(r.result, { values: [], label: r.kind });
+    const tries = one("SELECT COUNT(*) AS n FROM character_rolls WHERE user_id = ? AND kind = ? AND created_at BETWEEN datetime(?, '-1 day') AND ?", uid, r.kind, r.created_at, r.created_at)!.n;
+    return `Rolled on the site: ${v.label} = ${v.values.join(", ")}${tries > 1 ? ` (rolled ${tries} times in the 24 hours before)` : ""}`;
+  });
+  for (const r of rows) run("UPDATE character_rolls SET used = 1 WHERE id = ?", r.id);
+  return lines.join("\n");
+}
 
 // Full edit. Players' edits wait for the DM; the DM's edits apply right away.
 characterRoutes.put("/characters/:id", (req, res) => {
