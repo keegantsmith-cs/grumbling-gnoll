@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
+import { Recaps } from "../components/Recaps";
 
 export function Settings({ campaign, reload }: { campaign: Campaign; reload: () => void }) {
   const { toast } = useStatus();
@@ -26,6 +27,8 @@ export function Settings({ campaign, reload }: { campaign: Campaign; reload: () 
           <li><code>/w Name message</code> private message</li>
         </ul>
         <a href={`/api/campaigns/${campaign.id}/chat/export`} target="_blank">Download the chat log</a>
+        <hr />
+        <Recaps campaignId={campaign.id} isDM={false} />
       </div>
     );
   }

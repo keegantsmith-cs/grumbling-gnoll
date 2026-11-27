@@ -752,3 +752,41 @@ Reply in Markdown, under 300 words, with short headings and bullets. Cover what 
     friendlyError(e);
   }
 }
+
+// ---------- Session recaps ----------
+
+const RecapSchema = z.object({
+  title: z.string(),
+  player_recap: z.string(),
+  dm_notes: z.string(),
+});
+export type SessionRecap = z.infer<typeof RecapSchema>;
+
+export async function writeSessionRecap(ctx: CampaignContext, userId: number, log: string, dmExtra: string): Promise<SessionRecap> {
+  const anthropic = getClient();
+  const prompt = `Here is the table log from our latest D&D session (chat, dice rolls, things the DM shared, and turn order). Lines marked [private] were whispers or secret rolls.
+
+${log}
+${dmExtra ? `\nThe DM adds: ${dmExtra}` : ""}
+
+Write:
+- title: a short, evocative title for the session (like a TV episode).
+- player_recap: a recap the PLAYERS will read at the start of next session, in Markdown, 150-300 words, written like a storyteller ("Previously, on..."), covering what the party did, who they met, what they found and where they stopped. Mention the characters by name and highlight a couple of memorable moments (great or terrible rolls). Never reveal anything from [private] lines, the DM's secret notes, or plot the players haven't discovered.
+- dm_notes: notes for the DM only, in Markdown bullets: loose threads and promises, NPC attitudes that changed, treasure handed out, things players seemed excited about, and ideas for next session. These may use private information.
+If the log is thin, keep it short and don't invent events.`;
+  try {
+    const msg = await anthropic.beta.messages.parse({
+      ...callParams("assistant"),
+      max_tokens: 12000,
+      output_config: { effort: "low", format: betaZodOutputFormat(RecapSchema) },
+      system: campaignSystem(ctx),
+      messages: [{ role: "user", content: prompt }],
+    });
+    checkStop(msg);
+    if (!msg.parsed_output) throw new AIError("The recap came back in an unexpected format. Try again.");
+    logUsage(ctx.id, userId, "session-recap", msg.parsed_output.title, msg.parsed_output, msg);
+    return msg.parsed_output;
+  } catch (e) {
+    friendlyError(e);
+  }
+}

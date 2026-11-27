@@ -26,6 +26,7 @@ const { compendiumRoutes } = await import("./routes/compendium.ts");
 const { aiRoutes } = await import("./routes/ai.ts");
 const { adventureRoutes } = await import("./routes/adventures.ts");
 const { srdRoutes } = await import("./routes/srd.ts");
+const { recapRoutes } = await import("./routes/recaps.ts");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -35,7 +36,7 @@ app.use(attachUser);
 const { rememberOrigin } = await import("./discord.ts");
 app.use((req, _res, next) => { if (req.user) rememberOrigin(`${req.protocol}://${req.get("host")}`); next(); });
 
-app.use("/api", authRoutes, campaignRoutes, characterRoutes, mapRoutes, compendiumRoutes, aiRoutes, adventureRoutes, srdRoutes);
+app.use("/api", authRoutes, campaignRoutes, characterRoutes, mapRoutes, compendiumRoutes, aiRoutes, adventureRoutes, srdRoutes, recapRoutes);
 app.use("/api", (_req, res) => res.status(404).json({ error: "Not found" }));
 
 // Uploaded maps and images. Only logged-in users can see them.

@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { Markdown } from "../components/Markdown";
+import { Recaps } from "../components/Recaps";
 
 const KINDS: [string, string, string][] = [
   ["npc", "🧔 NPC", "A nervous halfling fence who owes the thieves' guild money"],
@@ -60,6 +61,7 @@ export function Assistant({ campaign }: { campaign: Campaign }) {
       </form>
       {error && <div className="error">{error}</div>}
       {result && <ResultCard r={result} campaign={campaign} toast={toast} />}
+      <Recaps campaignId={campaign.id} isDM />
       {history.data && history.data.length > 0 && (
         <>
           <h2>Earlier</h2>
