@@ -6,6 +6,7 @@ import { notify, broadcastMap } from "../realtime.ts";
 import { aiEnabled, characterArtPrompt, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
+import { characterSheetPdf } from "../sheetpdf.ts";
 import { derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
 
 export const characterRoutes = Router();
@@ -328,6 +329,18 @@ async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
     return undefined;
   }
 }
+
+// Printable PDF of the character sheet (owner, DM, and the rest of the party can download it)
+characterRoutes.get("/characters/:id/pdf", async (req, res) => {
+  const { c, isOwner, isDM } = loadCharacter(num(req.params.id), req.user!.id);
+  if (!isOwner && !isDM && c.status !== "approved") throw new HttpError(404, "Character not found");
+  const data = normalizeCharacter(parseJSON(c.data, {}), rulesOf(c.campaign_id));
+  const bytes = await characterSheetPdf(data, { player: c.owner_name, campaign: c.campaign_name, status: c.status });
+  const file = `${data.name.replace(/[^\w -]+/g, "").trim().replace(/\s+/g, "_") || "character"}_Grumbling_Gnoll.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${file}"`);
+  res.send(Buffer.from(bytes));
+});
 
 // The DM can hand a character to a player (e.g. a pregenerated hero, or one the DM built for them)
 characterRoutes.post("/characters/:id/owner", (req, res) => {

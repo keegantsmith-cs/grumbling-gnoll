@@ -64,6 +64,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
           onChange={(portraitUrl) => play({ portraitUrl }, { portraitUrl })} />
         <h1 className="grow" style={{ margin: 0 }}>{d.name}</h1>
         <StatusPill c={c} />
+        <a className="btn" href={`/api/characters/${id}/pdf`} title="Download a printable PDF of this character sheet">📄 Download PDF</a>
         {onDone && <button onClick={onDone}>← Back</button>}
       </div>
       <p className="muted">
@@ -201,7 +202,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
       <div className="card">
         <h3>More</h3>
         <div className="row">
-          <button onClick={() => downloadFile(`${d.name.replace(/\W+/g, "_")}.json`, JSON.stringify({ app: "grumbling-gnoll", data: c.data }, null, 2))}>Download as file</button>
+          <button onClick={() => downloadFile(`${d.name.replace(/\W+/g, "_")}.json`, JSON.stringify({ app: "grumbling-gnoll", data: c.data }, null, 2))}>Download data file (for importing)</button>
           {c.ownerId === status.user?.id && otherCampaigns.length > 0 && (
             <select value="" style={{ width: "auto" }} onChange={async (e) => {
               const target = Number(e.target.value);
