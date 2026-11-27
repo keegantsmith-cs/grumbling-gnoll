@@ -868,3 +868,64 @@ ${notes}`,
     friendlyError(e);
   }
 }
+
+// ---------- Enriching an uploaded map (Claude reads the picture; it doesn't change it) ----------
+
+const EnrichSchema = z.object({
+  name: z.string(),
+  overview: z.string(),
+  atmosphere: z.string(),
+  grid: z.object({ has_grid: z.boolean(), cells_across: z.number() }),
+  areas: z.array(z.object({
+    label: z.string(), name: z.string(), x_pct: z.number(), y_pct: z.number(),
+    read_aloud: z.string(), sensory: z.string(), dm_notes: z.string(),
+  })),
+  points: z.array(z.object({
+    title: z.string(), kind: z.enum(["treasure", "trap", "door", "secret", "feature", "hazard", "creature", "clue", "light", "exit"]),
+    x_pct: z.number(), y_pct: z.number(), note: z.string(),
+  })),
+  encounters: z.array(z.object({
+    name: z.string(), area_label: z.string(), tactics: z.string(),
+    monsters: z.array(z.object({ name: z.string(), count: z.number() })),
+  })),
+});
+export type MapEnrichment = z.infer<typeof EnrichSchema>;
+
+export async function enrichMap(ctx: CampaignContext, userId: number, opts: { imageBase64: string; mediaType: string; mapName: string; request: string }): Promise<MapEnrichment> {
+  const anthropic = getClient();
+  const prompt = `This is a battle map / location map the DM uploaded, called "${opts.mapName}". Study it closely and make it richer to play.
+${opts.request ? `What the DM wants: ${opts.request}\n` : ""}
+- name: a good name for the location.
+- overview: 2-4 sentences: what this place is and what's going on here, tied to the campaign notes when it fits.
+- atmosphere: lighting, sounds, smells, weather/temperature for the whole place.
+- grid: whether a grid is drawn on the image, and roughly how many squares/hexes span its full width (0 if none).
+- areas: each distinct room/region you can see, labelled 1, 2, 3... with x_pct/y_pct = the area's centre as a percentage of the image width/height (0-100, measured from the top-left). Give read-aloud text (2-4 sentences, vivid), sensory details, and DM notes (what's really here, hidden things, checks with DCs, treasure suited to the party).
+- points: specific features worth a marker (chests, altars, statues, traps, secret doors, levers, pools, exits, light sources...), positioned precisely with x_pct/y_pct on the feature itself. Note = what the DM needs to know. Only things you can actually see or that clearly fit the spot.
+- encounters: 1-3 encounter ideas suited to the party's levels, using standard 5e creature names (e.g. "Goblin", "Bandit Captain", "Giant Spider") so they can be found in the rules, with counts and tactics using this map's terrain.
+Base everything on what's really in the picture. Don't contradict the drawing.`;
+  try {
+    const stream = anthropic.beta.messages.stream({
+      ...callParams("maps"),
+      max_tokens: 24000,
+      output_config: { effort: "medium", format: betaZodOutputFormat(EnrichSchema) },
+      system: campaignSystem(ctx),
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: opts.mediaType as "image/jpeg", data: opts.imageBase64 } },
+          { type: "text", text: prompt },
+        ],
+      }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const parsed = EnrichSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) throw new AIError("The AI's notes on the map came back in an unexpected format. Try again.");
+    logUsage(ctx.id, userId, "map-enrich", opts.mapName, { areas: parsed.data.areas.length, points: parsed.data.points.length }, msg);
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new AIError("The AI's notes came back incomplete. Try again.");
+    friendlyError(e);
+  }
+}

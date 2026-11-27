@@ -4,6 +4,7 @@ import { go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import type { CampaignSocket } from "../socket";
 import { AdventureMaps, type AdvMap } from "../components/AdventureMaps";
+import { shrinkImage } from "../components/ScanSheet";
 
 export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live: CampaignSocket; onChange: () => void }) {
   const { status, toast } = useStatus();
@@ -121,7 +122,9 @@ function GridPicker({ value, onChange }: { value: string; onChange: (v: string) 
 }
 
 function MapRow({ m, active, show, reload, toast }: { m: any; active: boolean; show: (id: number) => void; reload: () => void; toast: (s: string) => void }) {
+  const { status } = useStatus();
   const [edit, setEdit] = useState(false);
+  const [enrich, setEnrich] = useState(false);
   const [f, setF] = useState({ name: m.name, gridType: m.gridType, gridSize: m.gridSize, gridOffsetX: m.gridOffsetX, gridOffsetY: m.gridOffsetY, feetPerCell: m.feetPerCell, fogEnabled: m.fogEnabled });
   const save = async () => { await api.patch(`/maps/${m.id}`, f); toast("Map updated"); setEdit(false); reload(); };
   return (
@@ -132,10 +135,12 @@ function MapRow({ m, active, show, reload, toast }: { m: any; active: boolean; s
         <td>{m.fogEnabled ? "On" : "Off"}</td>
         <td style={{ textAlign: "right" }}>
           <button className="primary small" onClick={() => show(m.id)}>{active ? "Open table" : "Show to players"}</button>{" "}
+          {m.imageUrl && status.aiEnabled && <button className="small" onClick={() => setEnrich(!enrich)} title="AI reads the map and writes a room key, markers and encounter ideas">✨ Enrich</button>}{" "}
           <button className="small" onClick={() => setEdit(!edit)}>Settings</button>{" "}
           <button className="small danger" onClick={async () => { if (confirm(`Delete ${m.name}?`)) { await api.del(`/maps/${m.id}`); reload(); } }}>Delete</button>
         </td>
       </tr>
+      {enrich && <tr><td colSpan={4}><EnrichPanel m={m} done={() => { setEnrich(false); reload(); }} /></td></tr>}
       {edit && (
         <tr><td colSpan={4}>
           <div className="row">
@@ -152,5 +157,52 @@ function MapRow({ m, active, show, reload, toast }: { m: any; active: boolean; s
         </td></tr>
       )}
     </>
+  );
+}
+
+/** "Enrich with AI": Claude reads the picture and adds a room key, markers and encounter ideas. */
+function EnrichPanel({ m, done }: { m: any; done: () => void }) {
+  const { toast } = useStatus();
+  const [request, setRequest] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  async function run() {
+    setBusy(true);
+    try {
+      const blob = await fetch(m.imageUrl).then((r) => r.blob());
+      const small = await shrinkImage(new File([blob], "map.jpg", { type: blob.type || "image/jpeg" }), 1568);
+      const fd = new FormData();
+      fd.append("image", small, "map.jpg");
+      fd.append("request", request);
+      setResult(await api.post(`/maps/${m.id}/enrich`, fd));
+    } catch (e) { toast((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  const gridSize = result?.grid?.has_grid && result.grid.cells_across > 0 ? Math.round(m.width / result.grid.cells_across) : null;
+  return (
+    <div className="card" style={{ border: "1px solid var(--gold)", marginBottom: 0 }}>
+      <b>✨ Enrich "{m.name}" with AI</b>
+      {!result ? (
+        <>
+          <p className="muted" style={{ fontSize: 13 }}>
+            The AI studies the picture and adds: a <b>room key</b> with read-aloud text and DM notes (Table → Map key), <b>markers</b> for treasure, traps, doors and other features (only you see them until you reveal them), <b>atmosphere</b>, <b>encounter ideas</b> for your party, and a grid size estimate. The picture itself isn't changed. About 1–3¢.
+            {m.hasKey ? " This replaces the map's current key and markers." : ""}
+          </p>
+          <div className="row">
+            <input className="grow" value={request} onChange={(e) => setRequest(e.target.value)} placeholder="Optional: e.g. 'a haunted temple of a drowned god', 'make it a goblin lair'" />
+            <button className="primary" disabled={busy} onClick={run}>{busy ? "Studying the map... (about a minute)" : "Enrich"}</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>Added {result.areas} areas, {result.points} markers and {result.encounters} encounter ideas. Open the map on the Table and look at the <b>Map key</b> tab.</p>
+          <div className="row">
+            {result.suggestedName && result.suggestedName !== m.name && <button className="small" onClick={() => api.patch(`/maps/${m.id}`, { name: result.suggestedName }).then(() => toast("Renamed"))}>Rename to "{result.suggestedName}"</button>}
+            {gridSize && gridSize !== m.gridSize && <button className="small" onClick={() => api.patch(`/maps/${m.id}`, { gridSize, gridType: "square" }).then(() => toast(`Grid set to ${gridSize}px squares`))}>Use the AI's grid guess ({result.grid.cells_across} squares across, {gridSize}px)</button>}
+            <button className="small" onClick={done}>Done</button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
-import { campaignAccess, campaignAccessById, campaignContext, HttpError, imageUpload, num } from "../helpers.ts";
+import { campaignAccess, campaignAccessById, campaignContext, HttpError, imageUpload, num, sheetUpload } from "../helpers.ts";
 import { broadcastMap } from "../realtime.ts";
-import { designMap } from "../ai.ts";
+import { designMap, enrichMap } from "../ai.ts";
+import { srdMonster } from "./srd.ts";
 import { generateCave, generateDungeon, mapFromDesign, type GeneratedMap } from "../../shared/mapgen.ts";
 
 export const mapRoutes = Router();
@@ -20,6 +21,7 @@ const listOut = (m: any) => ({
   height: m.height,
   gridType: m.grid_type,
   gridSize: m.grid_size,
+  hasKey: !!m.dm_key,
   gridOffsetX: m.grid_offset_x,
   gridOffsetY: m.grid_offset_y,
   feetPerCell: m.feet_per_cell,
@@ -125,4 +127,43 @@ mapRoutes.delete("/maps/:mapId", (req, res) => {
   run("DELETE FROM maps WHERE id = ?", m.id);
   broadcastMap(m.campaign_id);
   res.json({ ok: true });
+});
+
+// ---------- AI enrichment of uploaded maps ----------
+// The browser sends a shrunk copy of the map picture; Claude reads it and writes a room key,
+// atmosphere, DM-only points of interest and encounter ideas. The picture itself isn't changed.
+mapRoutes.post("/maps/:mapId/enrich", sheetUpload.single("image"), async (req, res) => {
+  const m = one("SELECT * FROM maps WHERE id = ?", num(req.params.mapId));
+  if (!m) throw new HttpError(404, "Map not found");
+  campaignAccessById(m.campaign_id, req.user!.id, true);
+  if (!req.file || !/^image\/(jpeg|png|webp)$/.test(req.file.mimetype)) throw new HttpError(400, "The map picture didn't come through. Try again.");
+  if (req.file.size > 5 * 1024 * 1024) throw new HttpError(400, "That picture is too big to send to the AI.");
+  const e = await enrichMap(campaignContext(m.campaign_id), req.user!.id, {
+    imageBase64: req.file.buffer.toString("base64"), mediaType: req.file.mimetype, mapName: m.name, request: String(req.body?.request ?? "").slice(0, 1000),
+  });
+  const px = (pct: number, size: number) => Math.max(0, Math.min(size, (Number(pct) / 100) * size));
+  let nextId = 1;
+  const pois = [
+    ...e.areas.map((a) => ({ id: nextId++, kind: "area", label: a.label, title: a.name, note: a.dm_notes, x: px(a.x_pct, m.width), y: px(a.y_pct, m.height), revealed: false })),
+    ...e.points.map((p) => ({ id: nextId++, kind: p.kind, label: "", title: p.title, note: p.note, x: px(p.x_pct, m.width), y: px(p.y_pct, m.height), revealed: false })),
+  ];
+  // Link encounter monsters to the rules so the encounter builder can use them
+  const encounters = e.encounters.map((enc) => ({
+    ...enc,
+    monsters: enc.monsters.map((mon) => {
+      const own = one("SELECT id, data FROM compendium WHERE campaign_id = ? AND kind = 'monster' AND lower(name) = lower(?)", m.campaign_id, mon.name);
+      if (own) return { name: mon.name, count: Math.max(1, Math.round(mon.count)), cr: String(JSON.parse(own.data).challenge_rating ?? "0"), entryId: own.id };
+      const s = srdMonster(mon.name);
+      return { name: s?.name ?? mon.name, count: Math.max(1, Math.round(mon.count)), cr: String((s as any)?.challenge_rating ?? "0"), srdName: s?.name };
+    }),
+  }));
+  const key = [
+    `# ${e.name}`, e.overview, `**Atmosphere:** ${e.atmosphere}`,
+    ...e.areas.map((a) => `## ${a.label}. ${a.name}\n> ${a.read_aloud.replace(/\n/g, "\n> ")}\n\n*${a.sensory}*\n\n${a.dm_notes}`),
+    encounters.length ? `## Encounter ideas\n${encounters.map((x) => `- **${x.name}** (area ${x.area_label}): ${x.monsters.map((mo) => `${mo.count}× ${mo.name}`).join(", ")}. ${x.tactics}`).join("\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+  const enrichment = { suggestedName: e.name, atmosphere: e.atmosphere, grid: e.grid, encounters, enrichedAt: new Date().toISOString() };
+  run("UPDATE maps SET dm_key = ?, pois = ?, enrichment = ? WHERE id = ?", key, JSON.stringify(pois), JSON.stringify(enrichment), m.id);
+  broadcastMap(m.campaign_id);
+  res.json({ areas: e.areas.length, points: e.points.length, encounters: encounters.length, grid: e.grid, suggestedName: e.name });
 });

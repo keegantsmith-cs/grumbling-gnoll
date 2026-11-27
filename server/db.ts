@@ -324,3 +324,5 @@ CREATE TABLE IF NOT EXISTS encounters (
 );
 `);
 addColumn("campaigns", "dm_notes_backup", "TEXT NOT NULL DEFAULT ''");
+addColumn("maps", "pois", "TEXT NOT NULL DEFAULT '[]'"); // points of interest from the AI (or the DM)
+addColumn("maps", "enrichment", "TEXT NOT NULL DEFAULT '{}'"); // encounter ideas, grid estimate, atmosphere

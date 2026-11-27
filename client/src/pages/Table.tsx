@@ -14,6 +14,8 @@ import { Markdown } from "../components/Markdown";
 import { MonsterDrop } from "../components/MonsterDrop";
 import { RingEditor, RingsLayer } from "../components/Rings";
 import { EncounterBuilder } from "../components/EncounterBuilder";
+import { PoiCard, PoiLayer } from "../components/Pois";
+import type { Poi } from "../socket";
 
 type Tool = "select" | "measure" | "ping" | "reveal" | "revealRect" | "hideRect";
 
@@ -50,7 +52,31 @@ export function TableView({ campaign, live }: { campaign: Campaign; live: Campai
         {side === "chat" && <ChatPanel campaign={campaign} live={live} />}
         {side === "init" && <div className="side-body"><InitiativePanel campaign={campaign} live={live} /></div>}
         {side === "party" && <div className="side-body"><PartyPanel campaign={campaign} live={live} /></div>}
-        {side === "key" && map?.dmKey && <div className="side-body"><p className="muted">Only you can see this.</p><Markdown text={map.dmKey} /></div>}
+        {side === "key" && map?.dmKey && (
+          <div className="side-body">
+            <p className="muted">Only you can see this.</p>
+            {(map.pois?.length ?? 0) > 0 && (
+              <div className="row" style={{ marginBottom: 8 }}>
+                <span className="muted" style={{ fontSize: 12 }}>{map.pois.filter((p) => p.revealed).length}/{map.pois.length} markers revealed</span>
+                <button className="small" onClick={() => live.socket?.emit("poi", { op: "revealAll" })}>Reveal all</button>
+                <button className="small" onClick={() => live.socket?.emit("poi", { op: "hideAll" })}>Hide all</button>
+              </div>
+            )}
+            {(map.enrichment?.encounters?.length ?? 0) > 0 && (
+              <div className="card" style={{ padding: 8 }}>
+                <b>⚔️ Encounter ideas</b>
+                {map.enrichment!.encounters!.map((e, i) => (
+                  <div key={i} style={{ marginTop: 6 }}>
+                    <div><b>{e.name}</b> <span className="muted">(area {e.area_label})</span></div>
+                    <div className="muted" style={{ fontSize: 12 }}>{e.monsters.map((m) => `${m.count}× ${m.name}`).join(", ")}</div>
+                    <button className="small" onClick={() => window.dispatchEvent(new CustomEvent("gnoll-encounter", { detail: e.monsters }))}>Open in encounter builder</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Markdown text={map.dmKey} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -131,7 +157,15 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
   const sel = map.tokens.find((t) => t.id === selected) ?? null;
   const [menu, setMenu] = useState<{ sx: number; sy: number; p: { x: number; y: number }; tokenId?: number } | null>(null);
   const [dropAt, setDropAt] = useState<{ x: number; y: number } | null>(null);
+  const [poiOpen, setPoiOpen] = useState<{ p: Poi; at: { x: number; y: number } } | null>(null);
+  const [encounterRows, setEncounterRows] = useState<any[] | undefined>(undefined);
   const partyChars = useApprovedCharacters(campaign.id);
+
+  useEffect(() => {
+    const open = (ev: Event) => { setEncounterRows((ev as CustomEvent).detail); setEncounterAt(null); };
+    window.addEventListener("gnoll-encounter", open);
+    return () => window.removeEventListener("gnoll-encounter", open);
+  }, []);
 
   function onContext(e: Konva.KonvaEventObject<PointerEvent>) {
     e.evt.preventDefault();
@@ -195,6 +229,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           {generated && <KImage name="bg" image={generated} width={map.width} height={map.height} />}
           <Shape listening={false} sceneFunc={(ctx) => drawGrid(ctx._context, map, view.scale)} />
           <RingsLayer map={map} tokens={map.tokens} scale={view.scale} />
+          <PoiLayer map={map} scale={view.scale} isDM={isDM} onPick={(p, s) => setPoiOpen({ p, at: s })} />
           {map.tokens.map((t) => (
             <TokenNode key={t.id} t={t} map={map} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
               onSelect={() => setSelected(t.id)}
@@ -223,6 +258,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         </Layer>
       </Stage>
 
+      {poiOpen && <PoiCard p={map.pois.find((x) => x.id === poiOpen.p.id) ?? poiOpen.p} isDM={isDM} live={live} at={poiOpen.at} close={() => setPoiOpen(null)} />}
       {menu && (
         <ContextMenu menu={menu} map={map} isDM={isDM} me={me} live={live} chars={partyChars} ownedChars={ownedChars}
           canControl={canControl}
@@ -240,7 +276,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
       {encounterAt !== undefined && (
         <div style={{ position: "absolute", inset: 0, zIndex: 20, background: "#000a", overflow: "auto", padding: 16 }} onMouseDown={(e) => e.target === e.currentTarget && setEncounterAt(undefined)}>
           <div style={{ maxWidth: 900, margin: "0 auto" }}>
-            <EncounterBuilder campaign={campaign} at={encounterAt ?? undefined} close={() => setEncounterAt(undefined)} />
+            <EncounterBuilder campaign={campaign} at={encounterAt ?? undefined} initialRows={encounterRows} close={() => { setEncounterAt(undefined); setEncounterRows(undefined); }} />
           </div>
         </div>
       )}
@@ -535,6 +571,7 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
           {isDM && item("👹 Add monsters here…", () => openMonster(menu.p))}
           {isDM && item("⚔️ Build an encounter here…", () => openEncounter(menu.p))}
           {item("📍 Ping here", () => live.socket?.emit("ping", menu.p))}
+          {isDM && item("📌 Add a marker here…", () => { const title = prompt("Marker name (only you see it until you reveal it):"); if (title) live.socket?.emit("poi", { op: "add", x: menu.p.x, y: menu.p.y, title, note: prompt("Notes for you (optional):") ?? "" }); })}
           {isDM && map.fogEnabled && item("☀️ Reveal fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "reveal", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
           {isDM && map.fogEnabled && item("🌑 Cover with fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "hide", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
           {!isDM && placeable.length === 0 && <div className="ctx-item muted" style={{ cursor: "default" }}>You need an approved character to place a token.</div>}

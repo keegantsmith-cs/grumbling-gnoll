@@ -12,6 +12,7 @@ A private D&D 5e virtual tabletop and community site for a small group (about 10
 - **AI DM assistant** (Claude): NPCs, dialogue, read-aloud descriptions, encounters, loot, names, plot hooks, and rules questions. It knows your campaign notes and the party.
 - **AI rules check:** characters brought in from another campaign (or uploaded from a file) are checked automatically against that campaign's rules. The DM can run the check on any change.
 - **Edition converter:** upload scanned PDFs from OD&D, AD&D 1e/2e, 3.x, 4e or Pathfinder. The AI converts the monsters and magic items to 5e as drafts for the DM to review.
+- **Enrich uploaded maps:** the AI reads a map picture and writes a room key, DM-only markers you can reveal, atmosphere and encounter ideas.
 - **AI-designed maps:** describe a place, get a dungeon layout with a DM-only room key.
 
 Voice chat is meant to happen in Discord, alongside the site.

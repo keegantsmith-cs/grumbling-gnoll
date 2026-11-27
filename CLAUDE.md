@@ -18,7 +18,7 @@ A private D&D 5e virtual tabletop for one DM (the owner, non-technical) and ~10 
 - `client/src/components/`: shared UI (Chat, DiceTray, Rings, EncounterBuilder, MonsterDrop, SrdLookup, Markdown...).
 
 ## Rules that matter
-- **Privacy is a feature.** DM-only data must never reach players: character `dmNotes` (table `character_dm_notes`), suggestions (owner + DM only), NPC `statblock` in the compendium, hidden tokens, secret doors on generated maps, map `dmKey`, DM rolls, whispers, webhook URLs. Filter on the server, not in the UI. AI text that players read (e.g. character suggestions) must be generated WITHOUT DM-only context.
+- **Privacy is a feature.** DM-only data must never reach players: character `dmNotes` (table `character_dm_notes`), suggestions (owner + DM only), NPC `statblock` in the compendium, hidden tokens, secret doors on generated maps, map `dmKey`, unrevealed map markers (`maps.pois`) and marker notes, map `enrichment`, DM rolls, whispers, webhook URLs. Filter on the server, not in the UI. AI text that players read (e.g. character suggestions) must be generated WITHOUT DM-only context.
 - Players' character edits go to DM approval (`character_changes`); in-play values (HP, slots, portraits) save directly via `PATCH /characters/:id/play`.
 - Copyright: ship only SRD content. Users add other books privately (compendium, PDF conversion).
 

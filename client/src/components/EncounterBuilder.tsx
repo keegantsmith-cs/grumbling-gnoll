@@ -14,11 +14,11 @@ const DIFF_COLOR: Record<string, string> = {
 };
 
 /** Build an encounter, see how hard it is for this party, save it, and put it on the map. */
-export function EncounterBuilder({ campaign, at, onPlaced, close }: { campaign: Campaign; at?: { x: number; y: number }; onPlaced?: () => void; close: () => void }) {
+export function EncounterBuilder({ campaign, at, onPlaced, close, initialRows }: { campaign: Campaign; at?: { x: number; y: number }; onPlaced?: () => void; close: () => void; initialRows?: Row[] }) {
   const { toast } = useStatus();
   const chars = useLoad<any[]>(`/characters?campaignId=${campaign.id}`);
   const saved = useLoad<any[]>(`/campaigns/${campaign.id}/encounters`);
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<Row[]>(initialRows ?? []);
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [excluded, setExcluded] = useState<Set<number>>(new Set());

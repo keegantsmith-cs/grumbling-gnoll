@@ -13,6 +13,7 @@ export interface MapState {
   id: number; name: string; imageUrl: string | null; generated: any; width: number; height: number;
   gridType: "square" | "hex" | "none"; gridSize: number; gridOffsetX: number; gridOffsetY: number; feetPerCell: number;
   fogEnabled: boolean; fog: FogShape[]; dmKey?: string; tokens: Token[];
+  pois: Poi[]; enrichment?: { suggestedName?: string; atmosphere?: string; grid?: { has_grid: boolean; cells_across: number }; encounters?: { name: string; area_label: string; tactics: string; monsters: { name: string; count: number; cr: string; srdName?: string; entryId?: number }[] }[]; enrichedAt?: string };
 }
 export interface ChatMsg { id: number; userId: number | null; name: string; kind: string; body: any; whisperTo: number | null; createdAt: string }
 export interface InitEntry { id: number; name: string; init: number | null; dex?: number; hidden?: boolean; ownerId: number; tokenId?: number | null }
@@ -63,3 +64,5 @@ export function useCampaignSocket(campaignId: number, onToast: (m: string) => vo
 }
 
 export type CampaignSocket = ReturnType<typeof useCampaignSocket>;
+
+export interface Poi { id: number; kind: string; label: string; title: string; note?: string; x: number; y: number; revealed: boolean }

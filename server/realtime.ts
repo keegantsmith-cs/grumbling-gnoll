@@ -50,6 +50,9 @@ export function mapPayload(mapId: number | null, isDM: boolean) {
     fogEnabled: !!m.fog_enabled,
     fog: parseJSON(m.fog, []),
     dmKey: isDM ? m.dm_key : undefined,
+    // Points of interest: the DM sees everything; players only see revealed markers, without the DM's notes
+    pois: parseJSON<Row[]>(m.pois, []).filter((p) => isDM || p.revealed).map((p) => (isDM ? p : { id: p.id, kind: p.kind, label: p.label, title: p.title, x: p.x, y: p.y, revealed: true })),
+    enrichment: isDM ? parseJSON(m.enrichment, {}) : undefined,
     tokens: tokens.map(tokenOut),
   };
 }
@@ -335,6 +338,20 @@ export function initRealtime(server: HttpServer) {
       const t = tokenOnActiveMap(Number(id), d.campaignId);
       if (!t || !(d.isDM || canMoveToken(t, d))) return;
       run("DELETE FROM tokens WHERE id = ?", t.id);
+      broadcastMap(d.campaignId);
+    });
+
+    // ---- points of interest (DM only) ----
+    socket.on("poi", (p: { op: "reveal" | "hide" | "delete" | "add" | "revealAll" | "hideAll"; id?: number; x?: number; y?: number; title?: string; note?: string }) => {
+      if (!d.campaignId || !d.isDM) return;
+      const c = one("SELECT active_map_id FROM campaigns WHERE id = ?", d.campaignId)!;
+      if (!c.active_map_id) return;
+      let pois = parseJSON<Row[]>(one("SELECT pois FROM maps WHERE id = ?", c.active_map_id)!.pois, []);
+      if (p.op === "reveal" || p.op === "hide") pois = pois.map((x) => (x.id === p.id ? { ...x, revealed: p.op === "reveal" } : x));
+      else if (p.op === "revealAll" || p.op === "hideAll") pois = pois.map((x) => ({ ...x, revealed: p.op === "revealAll" }));
+      else if (p.op === "delete") pois = pois.filter((x) => x.id !== p.id);
+      else if (p.op === "add") pois.push({ id: Math.max(0, ...pois.map((x) => x.id)) + 1, kind: "feature", label: "", title: String(p.title ?? "Note").slice(0, 80), note: String(p.note ?? "").slice(0, 1000), x: Number(p.x) || 0, y: Number(p.y) || 0, revealed: false });
+      run("UPDATE maps SET pois = ? WHERE id = ?", JSON.stringify(pois.slice(0, 200)), c.active_map_id);
       broadcastMap(d.campaignId);
     });
 
