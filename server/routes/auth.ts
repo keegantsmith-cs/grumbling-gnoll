@@ -25,7 +25,11 @@ authRoutes.post("/register", (req, res) => {
   if (one("SELECT id FROM users WHERE username = ?", username)) throw new HttpError(400, "That username is taken");
   const name = typeof displayName === "string" && displayName.trim() ? displayName.trim().slice(0, 40) : username;
   const r = run("INSERT INTO users (username, display_name, pass_hash, is_admin) VALUES (?,?,?,?)", username, name, hashPassword(password), firstUser ? 1 : 0);
-  if (invite) run("UPDATE invites SET uses_left = uses_left - 1 WHERE code = ?", invite.code);
+  if (invite) {
+    run("UPDATE invites SET uses_left = uses_left - 1 WHERE code = ?", invite.code);
+    // Invites made for a campaign drop the new player straight into it
+    if (invite.campaign_id) run("INSERT OR IGNORE INTO campaign_members (campaign_id, user_id, role) VALUES (?,?, 'player')", invite.campaign_id, Number(r.lastInsertRowid));
+  }
   setSessionCookie(res, createSession(Number(r.lastInsertRowid)));
   res.json({ ok: true });
 });
@@ -66,14 +70,23 @@ authRoutes.get("/users", requireUser, (_req, res) => {
   res.json(all("SELECT id, username, display_name AS displayName, is_admin AS isAdmin FROM users ORDER BY display_name"));
 });
 
+// Lets the sign-up page show which campaign an invite is for
+authRoutes.get("/invites/:code/info", (req, res) => {
+  const i = one("SELECT i.uses_left, c.name AS campaign FROM invites i LEFT JOIN campaigns c ON c.id = i.campaign_id WHERE i.code = ?", String(req.params.code).toUpperCase());
+  if (!i || i.uses_left <= 0) throw new HttpError(404, "That invite has been used up or deleted");
+  res.json({ campaign: i.campaign ?? null });
+});
+
 // ---- invites (admin) ----
 authRoutes.get("/invites", requireUser, requireAdmin, (_req, res) => {
-  res.json(all("SELECT code, uses_left AS usesLeft, created_at AS createdAt FROM invites WHERE uses_left > 0 ORDER BY created_at DESC"));
+  res.json(all("SELECT i.code, i.uses_left AS usesLeft, i.created_at AS createdAt, i.note, c.name AS campaignName FROM invites i LEFT JOIN campaigns c ON c.id = i.campaign_id WHERE i.uses_left > 0 ORDER BY i.created_at DESC"));
 });
 authRoutes.post("/invites", requireUser, requireAdmin, (req, res) => {
   const uses = Math.min(20, Math.max(1, Number(req.body?.uses) || 1));
   const code = newInviteCode();
-  run("INSERT INTO invites (code, created_by, uses_left) VALUES (?,?,?)", code, req.user!.id, uses);
+  const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null;
+  if (campaignId && !one("SELECT id FROM campaigns WHERE id = ?", campaignId)) throw new HttpError(404, "Campaign not found");
+  run("INSERT INTO invites (code, created_by, uses_left, campaign_id, note) VALUES (?,?,?,?,?)", code, req.user!.id, uses, campaignId, String(req.body?.note ?? "").slice(0, 200));
   res.json({ code, usesLeft: uses });
 });
 authRoutes.delete("/invites/:code", requireUser, requireAdmin, (req, res) => {

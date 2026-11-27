@@ -100,28 +100,123 @@ export function StatusPill({ c }: { c: any }) {
 }
 
 function Invites() {
+  const { status, toast } = useStatus();
   const invites = useLoad<any[]>("/invites");
+  const campaigns = useLoad<any[]>("/campaigns");
   const [uses, setUses] = useState(1);
+  const [emailing, setEmailing] = useState(false);
+  const joinLink = (code: string) => `${location.origin}/#/join/${code}`;
   return (
     <>
       <hr />
-      <h1>Invite players</h1>
-      <p className="muted">Send a code to each player. They pick "I have an invite code" on the login page. Then add them to your campaign from the campaign's Settings tab.</p>
+      <div className="row">
+        <h1 className="grow">Invite players</h1>
+        <button className="primary" onClick={() => setEmailing(!emailing)}>✉️ Invite by email</button>
+      </div>
+      <p className="muted">Send each player an invite. The link opens the sign-up page with their code filled in. Invites made for a campaign add the player to it automatically.</p>
+      {emailing && <EmailInvite campaigns={(campaigns.data ?? []).filter((c) => c.isDM)} dmName={status.user!.display_name} onDone={() => { invites.reload(); }} />}
       <div className="row" style={{ marginBottom: 10 }}>
         <label className="inline">Uses <input type="number" min={1} max={20} value={uses} onChange={(e) => setUses(Number(e.target.value))} style={{ width: 70 }} /></label>
-        <button className="primary" onClick={() => api.post("/invites", { uses }).then(invites.reload)}>Create invite code</button>
+        <button onClick={() => api.post("/invites", { uses }).then(invites.reload)}>Create a plain invite code</button>
       </div>
       <table className="list">
         <tbody>
           {invites.data?.map((i) => (
             <tr key={i.code}>
-              <td><code style={{ fontSize: 16 }}>{i.code}</code></td>
+              <td><code style={{ fontSize: 16 }}>{i.code}</code>{i.campaignName && <div className="muted" style={{ fontSize: 12 }}>joins {i.campaignName}</div>}{i.note && <div className="muted" style={{ fontSize: 12 }}>{i.note}</div>}</td>
               <td className="muted">{i.usesLeft} use{i.usesLeft === 1 ? "" : "s"} left</td>
-              <td><button className="small" onClick={() => navigator.clipboard?.writeText(i.code)}>Copy</button> <button className="small danger" onClick={() => api.del(`/invites/${i.code}`).then(invites.reload)}>Delete</button></td>
+              <td style={{ textAlign: "right" }}>
+                <button className="small" onClick={() => navigator.clipboard?.writeText(joinLink(i.code)).then(() => toast("Invite link copied"))}>Copy link</button>{" "}
+                <button className="small" onClick={() => navigator.clipboard?.writeText(i.code).then(() => toast("Code copied"))}>Copy code</button>{" "}
+                <button className="small danger" onClick={() => api.del(`/invites/${i.code}`).then(invites.reload)}>Delete</button>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </>
+  );
+}
+
+function fmtWhen(iso: string) {
+  return new Date(iso).toLocaleString([], { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** Writes an invite email and opens it in the DM's own email app (Gmail, Outlook, Apple Mail...). */
+function EmailInvite({ campaigns, dmName, onDone }: { campaigns: any[]; dmName: string; onDone: () => void }) {
+  const { toast } = useStatus();
+  const [emails, setEmails] = useState("");
+  const [campaignId, setCampaignId] = useState<string>(campaigns[0] ? String(campaigns[0].id) : "");
+  const [note, setNote] = useState("");
+  const [code, setCode] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const list = emails.split(/[\s,;]+/).map((e) => e.trim()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+  const camp = campaigns.find((c) => String(c.id) === campaignId);
+
+  function draft(c: string) {
+    const link = `${location.origin}/#/join/${c}`;
+    const what = camp ? `our D&D campaign "${camp.name}"` : "our D&D group";
+    const session = camp?.nextSessionAt && new Date(camp.nextSessionAt) > new Date() ? `\nOur next session is ${fmtWhen(camp.nextSessionAt)}.\n` : "";
+    setSubject(camp ? `You're invited: ${camp.name} at The Grumbling Gnoll 🍺` : "You're invited to The Grumbling Gnoll 🍺");
+    setBody(
+`Hi!
+
+${dmName} has invited you to join ${what} on The Grumbling Gnoll, the site we use for our games: maps, dice, character sheets and more.
+${note ? `\n${note}\n` : ""}
+To join:
+1. Open this link: ${link}
+2. Pick a username and password. Your invite code (${c}) is already filled in.
+3. Go to the Characters tab and make your character. There's a step-by-step creator, or you can photograph a paper sheet.
+${session}
+We talk during games on Discord, so have that ready too.
+
+See you at the table!
+${dmName}`);
+  }
+
+  async function prepare() {
+    try {
+      const r = await api.post("/invites", { uses: Math.max(1, list.length), campaignId: campaignId ? Number(campaignId) : undefined, note: list.join(", ").slice(0, 200) });
+      setCode(r.code);
+      draft(r.code);
+      onDone();
+    } catch (e) { toast((e as Error).message); }
+  }
+
+  const mailto = `mailto:?bcc=${encodeURIComponent(list.join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return (
+    <div className="card">
+      <h3>✉️ Invite by email</h3>
+      {!code ? (
+        <>
+          <label>Email addresses (separate with commas or new lines)<textarea rows={2} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="sam@example.com, jo@example.com" /></label>
+          <div className="row top">
+            <label>Add them to campaign
+              <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} style={{ width: "auto" }}>
+                <option value="">None (just the site)</option>
+                {campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="grow">Personal note (optional)<input value={note} onChange={(e) => setNote(e.target.value)} placeholder="We start on Friday at 7pm. Bring snacks!" /></label>
+          </div>
+          <button className="primary" disabled={!list.length} onClick={prepare}>Write the email ({list.length} {list.length === 1 ? "person" : "people"})</button>
+        </>
+      ) : (
+        <>
+          <p className="muted">Invite code <code>{code}</code> created ({list.length} use{list.length === 1 ? "" : "s"}). Check the email, then open it in your email app and press Send. Addresses go in BCC, so people don't see each other's.</p>
+          <label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+          <label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+          <div className="row">
+            <a className="btn primary" href={mailto} style={{ textDecoration: "none", background: "var(--red-dark)", borderColor: "var(--red)", color: "#fff" }}>Open in my email app</a>
+            <a className="btn" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}
+              href={`https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(list.join(","))}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`}>Open in Gmail</a>
+            <button onClick={() => navigator.clipboard?.writeText(`${subject}\n\n${body}`).then(() => toast("Message copied. Paste it into an email, text or Discord."))}>Copy message</button>
+            <button onClick={() => { setCode(""); setEmails(""); setNote(""); }}>Invite someone else</button>
+          </div>
+          <p className="muted" style={{ fontSize: 12 }}>Use Gmail in your browser? Click "Open in Gmail". If neither works, "Copy message" and paste it into any email, text or Discord message.</p>
+        </>
+      )}
+    </div>
   );
 }

@@ -277,3 +277,5 @@ CREATE TABLE IF NOT EXISTS character_dm_notes (
 );
 `);
 addColumn("character_changes", "ai_fix", "TEXT");
+addColumn("invites", "campaign_id", "INTEGER REFERENCES campaigns(id) ON DELETE SET NULL");
+addColumn("invites", "note", "TEXT NOT NULL DEFAULT ''");
