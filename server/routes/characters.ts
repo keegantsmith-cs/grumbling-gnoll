@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { all, one, parseJSON, run, type Row } from "../db.ts";
 import { campaignRole, requireUser } from "../auth.ts";
-import { campaignAccess, campaignContext, HttpError, num } from "../helpers.ts";
+import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap } from "../realtime.ts";
-import { aiEnabled, reviewCharacter } from "../ai.ts";
+import { aiEnabled, characterArtPrompt, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
+import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
 import { derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
 
@@ -181,6 +182,15 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
   if (b.pactSlotsUsed !== undefined) data.pactSlotsUsed = Math.max(0, Number(b.pactSlotsUsed) || 0);
   if (b.inspiration !== undefined) data.inspiration = !!b.inspiration;
   if (typeof b.notes === "string") data.notes = b.notes.slice(0, 50000);
+  // A new portrait doesn't change any rules, so it doesn't need DM approval
+  if (typeof b.portraitUrl === "string") {
+    const u = b.portraitUrl.trim();
+    if (u && !/^\/uploads\/[\w.-]+$/.test(u) && !/^https:\/\/\S+$/.test(u)) throw new HttpError(400, "That picture link isn't valid");
+    data.portraitUrl = u;
+    run("UPDATE character_changes SET proposed = json_set(proposed, '$.portraitUrl', ?) WHERE character_id = ? AND status = 'pending'", u, c.id);
+    run("UPDATE tokens SET image_url = ? WHERE character_id = ? AND (? = '' OR ? LIKE '/uploads/%')", u || null, c.id, u, u);
+    if (c.campaign_id) broadcastMap(c.campaign_id);
+  }
   run("UPDATE characters SET data = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), c.id);
   // keep linked tokens' HP in sync
   if (b.hp?.current !== undefined) {
@@ -192,6 +202,15 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
 });
 
 // Bring a character into another campaign (copy). Gets an automatic AI rules check.
+// Ask the AI for a picture description to paste into an image generator
+characterRoutes.post("/characters/:id/art-prompt", async (req, res) => {
+  const { c } = loadCharacter(num(req.params.id), req.user!.id, true);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const d = normalizeCharacter(parseJSON(c.data, {}));
+  const prompt = await characterArtPrompt(c.campaign_id, req.user!.id, d, String(req.body?.style ?? "").slice(0, 200));
+  res.json({ prompt });
+});
+
 characterRoutes.post("/characters/:id/import", async (req, res) => {
   const uid = req.user!.id;
   const { c } = loadCharacter(num(req.params.id), uid);
@@ -225,6 +244,84 @@ characterRoutes.post("/characters/upload", (req, res) => {
   res.json({ id });
   void runReview(changeId, uid);
 });
+
+// Read a photo / scan / PDF of a filled-in character sheet with the AI and turn it into a character.
+characterRoutes.post("/characters/scan", sheetUpload.array("files", 8), async (req, res) => {
+  const uid = req.user!.id;
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const campaignId = req.body?.campaignId ? Number(req.body.campaignId) : null;
+  const role = campaignId ? campaignRole(campaignId, uid) : undefined;
+  if (campaignId && !role) throw new HttpError(404, "Campaign not found");
+  const uploaded = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (!uploaded.length) throw new HttpError(400, "Add at least one photo or PDF of the sheet");
+
+  const files: SheetFile[] = [];
+  for (const f of uploaded) {
+    if (f.mimetype === "application/pdf") {
+      files.push({ kind: "pdf", mediaType: f.mimetype, base64: f.buffer.toString("base64"), formFields: await pdfFormFields(f.buffer) });
+    } else {
+      if (f.size > 5 * 1024 * 1024) throw new HttpError(400, `${f.originalname} is too large (5 MB max per photo)`);
+      files.push({ kind: "image", mediaType: f.mimetype === "image/jpg" ? "image/jpeg" : f.mimetype, base64: f.buffer.toString("base64") });
+    }
+  }
+  const rules = rulesOf(campaignId);
+  const s = await scanCharacterSheet({ campaignId, userId: uid, files, rulesVersion: rules });
+
+  const data = cleanData({
+    name: s.name || "Imported Character",
+    rulesVersion: rules,
+    species: s.species,
+    background: s.background,
+    alignment: s.alignment,
+    classes: s.classes.length ? s.classes.map((c) => ({ name: c.name, subclass: c.subclass, level: Math.max(1, Math.min(20, Math.round(c.level) || 1)) })) : undefined,
+    experience: s.experience,
+    abilities: s.abilities,
+    saveProficiencies: s.saveProficiencies,
+    skillProficiencies: s.skillProficiencies,
+    skillExpertise: s.skillExpertise,
+    hp: { max: s.hpMax, current: s.hpCurrent ?? s.hpMax ?? 10, temp: s.hpTemp },
+    ac: s.armorClass,
+    speed: s.speed || 30,
+    attacks: s.attacks,
+    spells: s.spells.map((sp) => ({ ...sp, level: Math.max(0, Math.min(9, Math.round(sp.level))), notes: "" })),
+    inventory: s.inventory.map((it) => ({ ...it, weight: 0, notes: "" })),
+    currency: s.currency,
+    features: s.features,
+    proficienciesText: s.proficienciesText,
+    personality: s.personality,
+    backstory: s.backstory,
+    notes: s.notes,
+  }, rules);
+
+  const note = `Imported from ${uploaded.length === 1 ? "a picture/PDF" : `${uploaded.length} pictures/PDFs`} of a character sheet.${s.readingProblems ? ` The AI wasn't sure about: ${s.readingProblems}` : ""}`;
+  const autoApprove = !campaignId || role === "dm";
+  const r = run("INSERT INTO characters (owner_id, campaign_id, name, data, status) VALUES (?,?,?,?,?)", uid, campaignId, data.name, JSON.stringify(data), autoApprove ? "approved" : "pending");
+  const id = Number(r.lastInsertRowid);
+  if (!autoApprove) {
+    const changeId = submitChange(id, uid, "import", data, note);
+    notify(campaignId!, "approvals");
+    void runReview(changeId, uid);
+  } else if (campaignId) notify(campaignId, "characters");
+  res.json({ id, readingProblems: s.readingProblems });
+});
+
+/** Values typed into a fillable PDF sheet, as "field: value" lines. */
+async function pdfFormFields(buf: Buffer): Promise<string | undefined> {
+  try {
+    const pdf = await PDFDocument.load(buf, { ignoreEncryption: true });
+    const lines: string[] = [];
+    for (const f of pdf.getForm().getFields()) {
+      let v = "";
+      if (f instanceof PDFTextField) v = f.getText() ?? "";
+      else if (f instanceof PDFCheckBox) v = f.isChecked() ? "checked" : "";
+      else if (f instanceof PDFDropdown) v = f.getSelected().join(", ");
+      if (v.trim()) lines.push(`${f.getName()}: ${v.trim()}`);
+    }
+    return lines.length ? lines.join("\n").slice(0, 60000) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 characterRoutes.delete("/characters/:id", (req, res) => {
   const { c } = loadCharacter(num(req.params.id), req.user!.id, true);

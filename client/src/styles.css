@@ -45,7 +45,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 button.primary { background: var(--red-dark); border-color: var(--red); color: #fff; }
 button.primary:hover:not(:disabled) { background: var(--red); }
 button.danger { color: #ff9b85; }
-button.small { padding: 2px 8px; font-size: 12px; }
+button.small, .btn.small { padding: 2px 8px; font-size: 12px; text-decoration: none; }
 button.active { border-color: var(--gold); color: var(--gold); }
 button.link { background: none; border: 0; color: var(--gold); padding: 0; text-decoration: underline; }
 

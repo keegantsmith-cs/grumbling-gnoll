@@ -3,6 +3,7 @@ import { api } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import { classSummary, totalLevel } from "../../../shared/character";
 import { fmtSession } from "./Settings";
+import { ScanSheet } from "../components/ScanSheet";
 
 export function Home() {
   const { status } = useStatus();
@@ -11,6 +12,7 @@ export function Home() {
   const [form, setForm] = useState({ name: "", description: "", rulesVersion: "2014" });
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -63,8 +65,10 @@ export function Home() {
       <hr />
       <div className="row">
         <h1 className="grow">Your characters</h1>
+        <button onClick={() => setScanning(true)}>📷 Import paper sheet</button>
         <button onClick={async () => { const r = await api.post("/characters", { data: { name: "New Adventurer" } }); go(`character/${r.id}`); }}>+ New character (no campaign)</button>
       </div>
+      {scanning && <ScanSheet onCancel={() => setScanning(false)} onDone={(id) => go(`character/${id}`)} />}
       <p className="muted">Characters you build inside a campaign need the DM's approval. You can also keep characters here and bring them into a campaign later.</p>
       <table className="list">
         <thead><tr><th>Name</th><th>Class</th><th>Campaign</th><th>Status</th></tr></thead>

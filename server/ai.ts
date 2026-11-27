@@ -362,3 +362,116 @@ Rules for the layout:
     friendlyError(e);
   }
 }
+
+// ---------- Reading a paper / PDF character sheet ----------
+
+const ABILITY = z.enum(["str", "dex", "con", "int", "wis", "cha"]);
+const SKILL = z.enum([
+  "acrobatics", "animal_handling", "arcana", "athletics", "deception", "history", "insight", "intimidation", "investigation",
+  "medicine", "nature", "perception", "performance", "persuasion", "religion", "sleight_of_hand", "stealth", "survival",
+]);
+const SheetSchema = z.object({
+  name: z.string(),
+  species: z.string(),
+  background: z.string(),
+  alignment: z.string(),
+  classes: z.array(z.object({ name: z.string(), subclass: z.string(), level: z.number() })),
+  experience: z.number(),
+  abilities: z.object({ str: z.number(), dex: z.number(), con: z.number(), int: z.number(), wis: z.number(), cha: z.number() }),
+  saveProficiencies: z.array(ABILITY),
+  skillProficiencies: z.array(SKILL),
+  skillExpertise: z.array(SKILL),
+  hpMax: z.number().nullable(),
+  hpCurrent: z.number().nullable(),
+  hpTemp: z.number(),
+  armorClass: z.number().nullable(),
+  speed: z.number(),
+  attacks: z.array(z.object({ name: z.string(), bonus: z.string(), damage: z.string(), notes: z.string() })),
+  spells: z.array(z.object({ name: z.string(), level: z.number(), prepared: z.boolean() })),
+  inventory: z.array(z.object({ name: z.string(), qty: z.number(), equipped: z.boolean(), attuned: z.boolean() })),
+  currency: z.object({ cp: z.number(), sp: z.number(), ep: z.number(), gp: z.number(), pp: z.number() }),
+  features: z.string(),
+  proficienciesText: z.string(),
+  personality: z.string(),
+  backstory: z.string(),
+  notes: z.string(),
+  readingProblems: z.string(),
+});
+export type ScannedSheet = z.infer<typeof SheetSchema>;
+
+export interface SheetFile { kind: "image" | "pdf"; mediaType: string; base64: string; formFields?: string }
+
+export async function scanCharacterSheet(opts: { campaignId: number | null; userId: number; files: SheetFile[]; rulesVersion: string }): Promise<ScannedSheet> {
+  const anthropic = getClient();
+  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+  for (const f of opts.files) {
+    if (f.kind === "pdf") {
+      content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.base64 } });
+      if (f.formFields) content.push({ type: "text", text: `Filled-in form fields from that PDF (field name: value). These are the most reliable source when present:\n${f.formFields}` });
+    } else {
+      content.push({ type: "image", source: { type: "base64", media_type: f.mediaType as "image/jpeg" | "image/png" | "image/webp", data: f.base64 } });
+    }
+  }
+  content.push({
+    type: "text",
+    text: `These are photos/scans/PDF pages of a filled-in D&D character sheet (could be the official sheet, a third-party sheet, or handwritten notes). Copy what's written into the structured format.
+
+- Copy what the player wrote. Don't invent or "fix" values, except obvious OCR or handwriting slips you can resolve from the rest of the sheet.
+- Ability scores are the big score numbers (usually 3-20), not the modifiers.
+- saveProficiencies / skillProficiencies: marked with a filled bubble, tick, or "P". skillExpertise: double-marked or labelled expertise.
+- classes: split multiclass entries like "Fighter 3 / Rogue 2". Put the subclass (archetype, oath, domain, etc.) in subclass.
+- hpMax is the hit point maximum; hpCurrent is current HP if written separately (null if blank).
+- attacks: weapon/spell attack rows. bonus like "+5", damage like "1d8+3 slashing".
+- spells: every spell listed, with level 0 for cantrips. prepared = true unless the sheet shows it unprepared.
+- Put class/racial features and feats in features; armor/weapon/tool proficiencies and languages in proficienciesText; traits/ideals/bonds/flaws in personality.
+- Use empty strings, 0, or empty lists for anything blank or missing.
+- In readingProblems, briefly list anything you couldn't read or weren't sure about (or "" if none) so the player can double-check.
+The campaign uses the ${opts.rulesVersion} 5e rules (for context only; copy the sheet as written).`,
+  });
+  try {
+    const stream = anthropic.beta.messages.stream({
+      model: AI_MODEL,
+      max_tokens: 32000,
+      ...fallbackParams(),
+      output_config: { effort: "medium", format: betaZodOutputFormat(SheetSchema) },
+      system: BASE_SYSTEM,
+      messages: [{ role: "user", content }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const parsed = SheetSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) throw new AIError("The AI couldn't make sense of that sheet. Try clearer photos.");
+    logUsage(opts.campaignId, opts.userId, "sheet-scan", `${opts.files.length} file(s)`, { name: parsed.data.name }, msg.usage);
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new AIError("The AI's reading of the sheet came back incomplete. Try again, or upload fewer pages.");
+    friendlyError(e);
+  }
+}
+
+// ---------- Portrait prompt ----------
+
+export async function characterArtPrompt(campaignId: number | null, userId: number, c: { name: string; species: string; classes: { name: string; subclass: string; level: number }[]; background: string; personality: string; backstory: string; features: string; inventory: { name: string; equipped: boolean }[] }, style: string): Promise<string> {
+  const anthropic = getClient();
+  const gear = c.inventory.filter((i) => i.equipped).map((i) => i.name).join(", ");
+  const info = `Name: ${c.name}\nSpecies: ${c.species}\nClass: ${c.classes.map((x) => `${x.name}${x.subclass ? ` (${x.subclass})` : ""} ${x.level}`).join(" / ")}\nBackground: ${c.background}\nEquipped gear: ${gear}\nPersonality: ${c.personality.slice(0, 1500)}\nBackstory: ${c.backstory.slice(0, 2500)}`;
+  try {
+    const msg = await anthropic.beta.messages.create({
+      model: AI_MODEL,
+      max_tokens: 2000,
+      ...fallbackParams(),
+      output_config: { effort: "low" },
+      messages: [{
+        role: "user",
+        content: `Write a prompt for an AI image generator to create a fantasy character portrait of this D&D character. One paragraph, 60-110 words: head-and-shoulders or bust framing, face clearly visible, species features, age, build, hair, clothing/armor, signature gear, expression that fits their personality, simple atmospheric background, lighting. Art style: ${style || "painterly fantasy illustration"}. No text or lettering in the image. Don't use the character's name or any franchise names. Reply with only the prompt.\n\n${info}`,
+      }],
+    });
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    logUsage(campaignId, userId, "art-prompt", c.name, text, msg.usage);
+    return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}

@@ -72,3 +72,10 @@ export const pdfUpload = multer({
 });
 
 export const jsonUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+// Character sheet photos/PDFs are read in memory and never saved to disk.
+export const sheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024, files: 8 },
+  fileFilter: (_req, file, cb) => cb(null, /^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype) || file.mimetype === "application/pdf"),
+});

@@ -4,6 +4,7 @@ import { go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { CharacterPage } from "./CharacterSheet";
 import { StatusPill } from "./Home";
+import { ScanSheet } from "../components/ScanSheet";
 import { blankCharacter, classSummary, derive } from "../../../shared/character";
 
 export function CharactersTab({ campaign, changed, openId, roll }: { campaign: Campaign; changed: { what: string; at: number }; openId?: string; roll: (e: string, l: string) => void }) {
@@ -11,6 +12,7 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
   const list = useLoad<any[]>(`/characters?campaignId=${campaign.id}`);
   const mine = useLoad<any[]>("/characters");
   const [error, setError] = useState("");
+  const [scanning, setScanning] = useState(false);
   useEffect(() => { if (changed.what === "characters" || changed.what === "approvals") list.reload(); }, [changed]);
 
   if (openId) return <CharacterPage id={Number(openId)} roll={roll} onDone={() => { list.reload(); go(`c/${campaign.id}/characters`); }} />;
@@ -40,8 +42,10 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
     <div>
       <div className="row">
         <h1 className="grow">Characters</h1>
+        <button onClick={() => setScanning(true)}>📷 Import paper sheet</button>
         <button className="primary" onClick={create}>+ New character</button>
       </div>
+      {scanning && <ScanSheet campaignId={campaign.id} onCancel={() => setScanning(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
       {error && <div className="error">{error}</div>}
       <p className="muted">
         This campaign uses the <b>{campaign.rulesVersion}</b> 5e rules. {campaign.isDM ? "Characters you make or edit here apply right away." : "New characters and changes go to the DM for approval. HP and spell slots during play don't need approval."}

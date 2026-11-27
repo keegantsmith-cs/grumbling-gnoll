@@ -4,6 +4,9 @@ A private D&D 5e virtual tabletop and community site for a small group (about 10
 
 - **Live table:** upload battle maps or generate them, square or hex grids, tokens, fog of war, measuring, pings, initiative tracker, chat, and server-side dice rolls (`/r 1d20+5`, advantage, secret DM rolls, whispers).
 - **Characters:** a full 5e sheet that does the math (modifiers, saves, skills, HP, multiclass spell slots, pact magic). New characters and edits need the **DM's approval**. HP and spell slots used during play don't.
+- **Import paper sheets:** photograph a filled-in character sheet (or upload a PDF, including fillable ones) and the AI copies it onto a sheet on the site.
+- **Portraits:** upload a character picture (also used as the map token), or have the AI write a prompt for a free image generator.
+- **Discord:** dice rolls, turns, shared handouts and session reminders post to your Discord channel; DM alerts go to a private channel.
 - **Rules per campaign:** each campaign uses either the 2014 or the 2024 5e rules.
 - **AI DM assistant** (Claude): NPCs, dialogue, read-aloud descriptions, encounters, loot, names, plot hooks, and rules questions. It knows your campaign notes and the party.
 - **AI rules check:** characters brought in from another campaign (or uploaded from a file) are checked automatically against that campaign's rules. The DM can run the check on any change.

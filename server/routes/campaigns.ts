@@ -97,6 +97,12 @@ campaignRoutes.delete("/campaigns/:id/members/:userId", (req, res) => {
   res.json({ ok: true });
 });
 
+// Image upload not tied to a campaign (character portraits)
+campaignRoutes.post("/images", imageUpload.single("image"), (req, res) => {
+  if (!req.file) throw new HttpError(400, "Please choose a PNG, JPG, WebP or GIF image");
+  res.json({ url: `/uploads/${req.file.filename}` });
+});
+
 // Generic image upload (token art, portraits, handouts)
 campaignRoutes.post("/campaigns/:id/images", imageUpload.single("image"), (req, res) => {
   campaignAccess(req);

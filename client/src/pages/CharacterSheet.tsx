@@ -6,6 +6,7 @@ import {
   type Ability, type CharacterData, type ClassLevel,
 } from "../../../shared/character";
 import { StatusPill } from "./Home";
+import { Portrait } from "../components/Portrait";
 
 type Roll = (expr: string, label: string) => void;
 
@@ -57,6 +58,8 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   return (
     <div>
       <div className="row">
+        <Portrait url={d.portraitUrl} canEdit={canEdit} characterId={id} name={d.name}
+          onChange={(portraitUrl) => play({ portraitUrl }, { portraitUrl })} />
         <h1 className="grow" style={{ margin: 0 }}>{d.name}</h1>
         <StatusPill c={c} />
         {onDone && <button onClick={onDone}>← Back</button>}
@@ -65,7 +68,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
         Level {dv.level} {d.species} {classSummary(d)} · played by {c.ownerName}
         {c.campaignName ? ` · ${c.campaignName}` : " · not in a campaign"} · {d.rulesVersion} rules
       </p>
-      {c.pending && <div className="notice">Changes submitted {c.pending.createdAt} are waiting for the DM. You're editing that version; saving again replaces it.</div>}
+      {c.pending && <div className="notice">Changes submitted {c.pending.createdAt} are waiting for the DM. You're editing that version; saving again replaces it.{c.pending.note && <div style={{ marginTop: 4 }}><i>{c.pending.note}</i></div>}</div>}
       {!c.pending && c.lastReview?.status === "rejected" && <div className="error">The DM sent back your last changes{c.lastReview.dmComment ? `: "${c.lastReview.dmComment}"` : "."}</div>}
       {c.lastReview?.status === "approved" && c.lastReview.dmComment && !c.pending && <div className="notice">DM's note on your last approval: "{c.lastReview.dmComment}"</div>}
       {msg && <div className="notice">{msg}</div>}
@@ -161,7 +164,6 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
               <label>Proficiencies & languages<textarea value={d.proficienciesText} onChange={(e) => upd({ proficienciesText: e.target.value })} placeholder="Armor, weapons, tools, languages" /></label>
               <label>Personality, ideals, bonds, flaws<textarea value={d.personality} onChange={(e) => upd({ personality: e.target.value })} /></label>
               <label>Backstory<textarea rows={5} value={d.backstory} onChange={(e) => upd({ backstory: e.target.value })} /></label>
-              <label>Portrait image link<input value={d.portraitUrl} onChange={(e) => upd({ portraitUrl: e.target.value })} placeholder="Used for your map token" /></label>
             </div>
           </div>
         </div>
