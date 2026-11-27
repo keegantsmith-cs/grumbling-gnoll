@@ -12,6 +12,7 @@ import { InitiativePanel } from "../components/Initiative";
 import { PartyPanel } from "../components/Party";
 import { Markdown } from "../components/Markdown";
 import { MonsterDrop } from "../components/MonsterDrop";
+import { NpcMaker } from "../components/NpcMaker";
 import { RingEditor, RingsLayer } from "../components/Rings";
 import { EncounterBuilder } from "../components/EncounterBuilder";
 import { PoiCard, PoiLayer } from "../components/Pois";
@@ -157,6 +158,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
   const sel = map.tokens.find((t) => t.id === selected) ?? null;
   const [menu, setMenu] = useState<{ sx: number; sy: number; p: { x: number; y: number }; tokenId?: number } | null>(null);
   const [dropAt, setDropAt] = useState<{ x: number; y: number } | null>(null);
+  const [npcAt, setNpcAt] = useState<{ x: number; y: number } | null>(null);
   const [poiOpen, setPoiOpen] = useState<{ p: Poi; at: { x: number; y: number } } | null>(null);
   const [encounterRows, setEncounterRows] = useState<any[] | undefined>(undefined);
   const partyChars = useApprovedCharacters(campaign.id);
@@ -265,7 +267,14 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           close={() => setMenu(null)}
           openToken={(id) => setSelected(id)}
           openEncounter={(p) => setEncounterAt(p)}
-          openMonster={(p) => setDropAt(p)} />
+          openMonster={(p) => setDropAt(p)}
+          openNpcs={(p) => setNpcAt(p)} />
+      )}
+      {npcAt && (
+        <div className="token-panel card">
+          <div className="row"><h3 className="grow" style={{ margin: 0 }}>🧑 Create NPCs here (AI)</h3><button className="small" onClick={() => setNpcAt(null)}>✕</button></div>
+          <NpcMaker campaignId={campaign.id} at={npcAt} onDone={() => setNpcAt(null)} />
+        </div>
       )}
       {dropAt && (
         <div className="token-panel card">
@@ -450,6 +459,11 @@ function AddToken({ map, view, size, isDM, campaign, live, close }: { map: MapSt
           <MonsterDrop campaignId={campaign.id} at={center} onDone={close} />
           <hr />
           <details>
+            <summary style={{ cursor: "pointer" }}><b>🧑 Create NPCs with AI</b></summary>
+            <div style={{ marginTop: 6 }}><NpcMaker campaignId={campaign.id} at={center} onDone={close} /></div>
+          </details>
+          <hr />
+          <details>
           <summary className="muted">Or make a custom token</summary>
           <label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
           <div className="row">
@@ -504,10 +518,11 @@ function useApprovedCharacters(campaignId: number) {
 }
 
 /** Right-click menu: add characters, monsters and encounters where you clicked; quick token actions. */
-function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl, close, openToken, openEncounter, openMonster }: {
+function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl, close, openToken, openEncounter, openMonster, openNpcs }: {
   menu: { sx: number; sy: number; p: { x: number; y: number }; tokenId?: number }; map: MapState; isDM: boolean; me: number; live: CampaignSocket;
   chars: any[]; ownedChars: Set<number>; canControl: (t: Token) => boolean; close: () => void;
   openToken: (id: number) => void; openEncounter: (p: { x: number; y: number }) => void; openMonster: (p: { x: number; y: number }) => void;
+  openNpcs: (p: { x: number; y: number }) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [sub, setSub] = useState<string | null>(null);
@@ -569,6 +584,7 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
             </div>
           ))}
           {isDM && item("👹 Add monsters here…", () => openMonster(menu.p))}
+          {isDM && item("🧑 Create NPCs here (AI)…", () => openNpcs(menu.p))}
           {isDM && item("⚔️ Build an encounter here…", () => openEncounter(menu.p))}
           {item("📍 Ping here", () => live.socket?.emit("ping", menu.p))}
           {isDM && item("📌 Add a marker here…", () => { const title = prompt("Marker name (only you see it until you reveal it):"); if (title) live.socket?.emit("poi", { op: "add", x: menu.p.x, y: menu.p.y, title, note: prompt("Notes for you (optional):") ?? "" }); })}

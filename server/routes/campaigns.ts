@@ -4,7 +4,7 @@ import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, imageUpload } from "../helpers.ts";
 import { addMonsterTokens, averageHp, broadcastMap, monsterMeta, notify, sizeToCells } from "../realtime.ts";
 import { srdMonster } from "./srd.ts";
-import { aiEnabled, condenseNotes } from "../ai.ts";
+import { aiEnabled, condenseNotes, generateNpcs } from "../ai.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
@@ -314,4 +314,37 @@ campaignRoutes.post("/campaigns/:id/notes/undo", (req, res) => {
   run("UPDATE campaigns SET dm_notes = ?, dm_notes_backup = ? WHERE id = ?", campaign.dm_notes_backup, campaign.dm_notes, id);
   notify(id, "campaign");
   res.json({ ok: true });
+});
+
+// ---------- AI NPCs for the current map: saved to the Compendium and placed as tokens ----------
+campaignRoutes.post("/campaigns/:id/table/npcs", async (req, res) => {
+  const { id } = campaignAccess(req, true);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const map = one("SELECT m.* FROM campaigns c JOIN maps m ON m.id = c.active_map_id WHERE c.id = ?", id);
+  if (!map) throw new HttpError(400, "Show a map on the table first (Maps tab → Show to players).");
+  const b = req.body ?? {};
+  const count = Math.max(1, Math.min(6, Math.round(Number(b.count) || 1)));
+  // Tell the AI about the place: map name, its key, and any markers near the click
+  const pois = JSON.parse(map.pois || "[]") as { title: string; x: number; y: number; kind: string }[];
+  const near = b.x != null ? pois.filter((p) => Math.hypot(p.x - Number(b.x), p.y - Number(b.y)) < map.grid_size * 6).map((p) => p.title) : [];
+  const place = [`Map: ${map.name}`, near.length ? `Right next to: ${near.join(", ")}` : "", String(map.dm_key ?? "").slice(0, 2500)].filter(Boolean).join("\n");
+  const batch = await generateNpcs(campaignContext(id), req.user!.id, { count, request: String(b.request ?? "").slice(0, 1500), place });
+  const g = map.grid_size || 70;
+  const placed: { name: string; entryId: number }[] = [];
+  batch.npcs.slice(0, count).forEach((n, i) => {
+    const markdown = `# ${n.name}\n*${n.role}* · ${n.attitude}\n\n${n.appearance}\n\n**Personality:** ${n.personality}\n\n**Voice:** ${n.voice}\n\n**Wants:** ${n.wants}\n\n**Secret:** ${n.secret}\n\n**Sample lines:**\n${n.sample_lines.map((l) => `- "${l}"`).join("\n")}`;
+    const r = run(
+      "INSERT INTO compendium (campaign_id, kind, name, data, source, status, player_visible, created_by) VALUES (?, 'npc', ?, ?, ?, 'approved', 0, ?)",
+      id, n.name.slice(0, 120), JSON.stringify({ markdown, statblock: n.statblock }), `AI NPC for ${map.name}`, req.user!.id,
+    );
+    placed.push({ name: n.name, entryId: Number(r.lastInsertRowid) });
+    const sb = n.statblock as Record<string, any>;
+    addMonsterTokens(id, req.user!.id, {
+      name: n.name, count: 1, hitPoints: Number(sb.hit_points) || averageHp(sb.hit_dice, 8), hitDice: sb.hit_dice,
+      size: sizeToCells(sb.size), hidden: !!b.hidden, initiative: "none", color: "#2f7d6d", meta: monsterMeta(sb),
+      x: b.x != null ? Number(b.x) + (i % 3) * g : undefined, y: b.y != null ? Number(b.y) + Math.floor(i / 3) * g : undefined,
+    });
+  });
+  notify(id, "compendium");
+  res.json({ npcs: placed });
 });

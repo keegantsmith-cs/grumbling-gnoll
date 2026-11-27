@@ -997,3 +997,42 @@ Use empty strings / empty lists for anything that doesn't apply.`;
     friendlyError(e);
   }
 }
+
+// ---------- NPCs for the current map ----------
+
+const NpcBatchSchema = z.object({
+  npcs: z.array(z.object({
+    name: z.string(), role: z.string(), appearance: z.string(), personality: z.string(), voice: z.string(),
+    wants: z.string(), secret: z.string(), attitude: z.string(), sample_lines: z.array(z.string()),
+    statblock: MonsterSchema,
+  })),
+});
+export type NpcBatch = z.infer<typeof NpcBatchSchema>;
+
+export async function generateNpcs(ctx: CampaignContext, userId: number, opts: { count: number; request: string; place: string }): Promise<NpcBatch> {
+  const anthropic = getClient();
+  const prompt = `Create ${opts.count} NPC${opts.count > 1 ? "s" : ""} for the DM to place on the map right now.
+Where: ${opts.place || "(not described)"}
+What the DM wants: ${opts.request || "people who would naturally be here, each with a reason to talk to the party"}
+
+For each NPC: a memorable name, their role here, appearance (1-2 sentences), personality, how they talk (voice, mannerisms, a catchphrase), what they want, a secret, their attitude toward the party, 3 sample lines of dialogue, and a 5e (${ctx.rulesVersion} rules) stat block that fits who they are (a barkeep isn't a knight), with a challenge rating that suits their role and the party. Use proper 5e attack formatting. Make the group varied and connected to each other or to the place where it makes sense. Use the campaign notes and current adventure if they fit.`;
+  try {
+    const stream = anthropic.beta.messages.stream({
+      ...callParams("assistant"),
+      max_tokens: 32000,
+      output_config: { effort: "low", format: betaZodOutputFormat(NpcBatchSchema) },
+      system: campaignSystem(ctx),
+      messages: [{ role: "user", content: prompt }],
+    });
+    const msg = await stream.finalMessage();
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    const parsed = NpcBatchSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) throw new AIError("The NPCs came back in an unexpected format. Try again.");
+    logUsage(ctx.id, userId, "map-npcs", opts.request || opts.place, { npcs: parsed.data.npcs.map((n) => n.name) }, msg);
+    return parsed.data;
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new AIError("The NPCs came back incomplete. Try fewer at once.");
+    friendlyError(e);
+  }
+}
