@@ -10,6 +10,7 @@ import { ChatPanel } from "../components/Chat";
 import { InitiativePanel } from "../components/Initiative";
 import { PartyPanel } from "../components/Party";
 import { Markdown } from "../components/Markdown";
+import { MonsterDrop } from "../components/MonsterDrop";
 
 type Tool = "select" | "measure" | "ping" | "reveal" | "revealRect" | "hideRect";
 
@@ -246,7 +247,7 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
         e.target.position(s);
         onMove(s.x, s.y);
       }}
-      opacity={t.hidden ? 0.5 : 1}
+      opacity={t.hidden ? 0.5 : t.hp != null && t.hp <= 0 ? 0.65 : 1}
     >
       <Circle radius={r} fill={t.color} stroke={selected ? "#ffdf6b" : "#111"} strokeWidth={selected ? 4 : 2} shadowBlur={6} shadowColor="#000" />
       {img && (
@@ -254,7 +255,7 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
           <KImage image={img} x={-r} y={-r} width={r * 2} height={r * 2} />
         </Group>
       )}
-      {!img && <Text text={t.name.slice(0, 2).toUpperCase()} fontSize={r * 0.8} fill="#fff" fontStyle="bold" width={r * 2} x={-r} y={-r * 0.4} align="center" />}
+      {!img && <Text text={(t.name.match(/^(\S).*?\s(\d+)$/) ? `${t.name[0]}${t.name.match(/(\d+)$/)![1]}` : t.name.slice(0, 2)).toUpperCase()} fontSize={r * 0.8} fill="#fff" fontStyle="bold" width={r * 2} x={-r} y={-r * 0.4} align="center" />}
       <Text text={t.name} fontSize={Math.max(11, map.gridSize * 0.2)} fill="#fff" stroke="#000" strokeWidth={0.5} width={r * 4} x={-r * 2} y={r + 2} align="center" />
       {hpPct != null && (
         <>
@@ -263,6 +264,12 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
         </>
       )}
       {t.conditions && <Text text="●" fill="#c77dff" fontSize={r * 0.6} x={r * 0.5} y={-r} />}
+      {t.hp != null && t.hp <= 0 && (
+        <>
+          <Line points={[-r * 0.6, -r * 0.6, r * 0.6, r * 0.6]} stroke="#d9534f" strokeWidth={r * 0.18} lineCap="round" />
+          <Line points={[r * 0.6, -r * 0.6, -r * 0.6, r * 0.6]} stroke="#d9534f" strokeWidth={r * 0.18} lineCap="round" />
+        </>
+      )}
     </Group>
   );
 }
@@ -289,6 +296,7 @@ function TokenEditor({ t, isDM, canEdit, live, close, campaign }: { t: Token; is
             <label className="grow">HP<input type="number" value={f.hp ?? ""} onChange={(e) => setF({ ...f, hp: e.target.value === "" ? null : Number(e.target.value) })} onBlur={() => save({ hp: f.hp })} /></label>
             {isDM && <label className="grow">Max HP<input type="number" value={f.maxHp ?? ""} onChange={(e) => setF({ ...f, maxHp: e.target.value === "" ? null : Number(e.target.value) })} onBlur={() => save({ maxHp: f.maxHp })} /></label>}
           </div>
+          <DamageBox t={t} save={save} />
           <div className="row" style={{ marginBottom: 8 }}>
             {[-10, -5, -1, 1, 5, 10].map((d) => <button key={d} className="small" onClick={() => save({ hp: (t.hp ?? 0) + d })}>{d > 0 ? `+${d}` : d}</button>)}
           </div>
@@ -353,7 +361,12 @@ function AddToken({ map, view, size, isDM, campaign, live, close }: { map: MapSt
       {isDM && (
         <>
           <hr />
-          <label>Monster / NPC name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <h3 style={{ marginBottom: 4 }}>⚔️ Monsters</h3>
+          <MonsterDrop campaignId={campaign.id} at={center} onDone={close} />
+          <hr />
+          <details>
+          <summary className="muted">Or make a custom token</summary>
+          <label>Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
           <div className="row">
             <label>Size<select value={f.size} onChange={(e) => setF({ ...f, size: Number(e.target.value) })}>
               <option value={0.5}>Tiny</option><option value={1}>Medium</option><option value={2}>Large</option><option value={3}>Huge</option><option value={4}>Gargantuan</option>
@@ -366,8 +379,33 @@ function AddToken({ map, view, size, isDM, campaign, live, close }: { map: MapSt
           <div style={{ marginTop: 8 }}>
             <button className="primary" onClick={() => live.socket?.emit("token:add", { ...f, hp: f.hp || null, maxHp: f.hp || null, ...center })}>Add</button>
           </div>
+          </details>
+          <div>
+          </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Type an amount, then Damage or Heal (healing can't go over max HP). */
+function DamageBox({ t, save }: { t: Token; save: (p: Partial<Token>) => void }) {
+  const [amt, setAmt] = useState("");
+  const n = Math.abs(Math.round(Number(amt) || 0));
+  const apply = (dir: -1 | 1) => {
+    if (!n) return;
+    let hp = (t.hp ?? 0) + dir * n;
+    if (dir > 0 && t.maxHp != null) hp = Math.min(t.maxHp, hp);
+    save({ hp });
+    setAmt("");
+  };
+  return (
+    <div className="row" style={{ marginBottom: 6 }}>
+      <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Amount" style={{ width: 80 }}
+        onKeyDown={(e) => { if (e.key === "Enter") apply(-1); }} />
+      <button className="small danger" disabled={!n} onClick={() => apply(-1)}>💥 Damage</button>
+      <button className="small" disabled={!n} onClick={() => apply(1)}>💚 Heal</button>
+      {t.hp != null && t.hp <= 0 && <span className="pill bad">down</span>}
     </div>
   );
 }

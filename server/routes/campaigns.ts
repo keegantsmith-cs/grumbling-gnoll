@@ -2,7 +2,7 @@ import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, HttpError, imageUpload } from "../helpers.ts";
-import { broadcastMap, notify } from "../realtime.ts";
+import { addMonsterTokens, averageHp, broadcastMap, notify, sizeToCells } from "../realtime.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
 export const campaignRoutes = Router();
@@ -171,4 +171,30 @@ campaignRoutes.post("/campaigns/:id/discord/test", async (req, res) => {
     throw new HttpError(400, `Discord didn't accept the message: ${(e as Error).message}`);
   }
   res.json({ ok: true });
+});
+
+// Put monsters (from the Compendium, an adventure, or the SRD) onto the map
+campaignRoutes.post("/campaigns/:id/table/monsters", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const b = req.body ?? {};
+  let m = b.monster as Record<string, any> | undefined;
+  if (b.entryId) {
+    const e = one("SELECT * FROM compendium WHERE id = ? AND campaign_id = ?", Number(b.entryId), id);
+    if (!e) throw new HttpError(404, "Entry not found");
+    const data = JSON.parse(e.data);
+    m = e.kind === "npc" ? { name: e.name, ...(data.statblock ?? {}) } : data;
+    if (!m!.name) m!.name = e.name;
+  }
+  if (!m?.name) throw new HttpError(400, "Pick a monster");
+  try {
+    const hp = Number(m.hit_points) || averageHp(m.hit_dice, 10);
+    const n = addMonsterTokens(id, req.user!.id, {
+      name: String(b.name || m.name), count: Number(b.count) || 1, hitPoints: hp, hitDice: m.hit_dice, rollHp: !!b.rollHp,
+      size: sizeToCells(m.size), hidden: !!b.hidden, initiative: b.initiative ?? "each", dexMod: Math.floor(((Number(m.dex) || 10) - 10) / 2),
+      x: b.x != null ? Number(b.x) : undefined, y: b.y != null ? Number(b.y) : undefined, color: b.color,
+    });
+    res.json({ added: n });
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
 });

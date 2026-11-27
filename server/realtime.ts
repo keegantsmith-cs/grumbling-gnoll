@@ -302,6 +302,17 @@ export function initRealtime(server: HttpServer) {
       const keys = Object.keys(fields);
       if (!keys.length) return;
       run(`UPDATE tokens SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...keys.map((k) => fields[k]), t.id);
+      // A player character's token and sheet share the same current HP
+      if (t.character_id && fields.hp != null) {
+        const ch = one("SELECT data FROM characters WHERE id = ?", t.character_id);
+        if (ch) {
+          const data = parseJSON<Row>(ch.data, {});
+          data.hp = { ...(data.hp ?? {}), current: fields.hp };
+          run("UPDATE characters SET data = ? WHERE id = ?", JSON.stringify(data), t.character_id);
+          run("UPDATE tokens SET hp = ? WHERE character_id = ?", fields.hp, t.character_id);
+          notify(d.campaignId, "characters");
+        }
+      }
       broadcastMap(d.campaignId);
     });
 
@@ -400,4 +411,66 @@ function presence(campaignId: number) {
   const names = new Map<number, string>();
   eachSocket(campaignId, (_s, d) => names.set(d.user.id, d.user.display_name));
   return [...names.entries()].map(([id, name]) => ({ id, name }));
+}
+
+// ---------- one-click monsters onto the map ----------
+
+export interface MonsterDrop {
+  name: string; count: number; hitPoints: number; hitDice?: string; rollHp?: boolean; size?: number; color?: string;
+  hidden?: boolean; initiative?: "none" | "each" | "group"; dexMod?: number; x?: number; y?: number; imageUrl?: string | null;
+}
+
+const SIZE_CELLS: Record<string, number> = { tiny: 0.5, small: 1, medium: 1, large: 2, huge: 3, gargantuan: 4 };
+export const sizeToCells = (s: string) => SIZE_CELLS[String(s).toLowerCase()] ?? 1;
+
+/** Places N tokens for a monster on the active map (and optionally rolls them into initiative). */
+export function addMonsterTokens(campaignId: number, userId: number, m: MonsterDrop): number {
+  const c = one("SELECT active_map_id, initiative FROM campaigns WHERE id = ?", campaignId)!;
+  if (!c.active_map_id) throw new Error("Show a map on the table first (Maps tab → Show to players).");
+  const map = one("SELECT * FROM maps WHERE id = ?", c.active_map_id)!;
+  const count = Math.max(1, Math.min(20, Math.round(m.count) || 1));
+  const g = map.grid_size || 70;
+  const size = Math.min(6, Math.max(0.5, m.size ?? 1));
+  const step = g * Math.max(1, size);
+  const perRow = Math.min(count, 5);
+  // Start from the given spot (or the middle of the map), laid out in a small block
+  const x0 = (m.x ?? map.width / 2) - ((perRow - 1) * step) / 2;
+  const y0 = m.y ?? map.height / 2;
+  const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
+  const dex = Math.round(m.dexMod ?? 0);
+  const groupInit = m.initiative === "group" ? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total : null;
+  const dmId = dmIdOf(campaignId);
+  for (let i = 0; i < count; i++) {
+    let hp = Math.max(1, Math.round(m.hitPoints) || 1);
+    if (m.rollHp && m.hitDice && /^\d+d\d+([+-]\d+)?$/.test(m.hitDice.replace(/\s/g, ""))) {
+      try { hp = Math.max(1, rollDice(m.hitDice.replace(/\s/g, "")).total); } catch { /* keep the average */ }
+    }
+    const name = count > 1 ? `${m.name} ${i + 1}` : m.name;
+    // line each token up with the grid
+    const snapTo = (v: number, off: number) => (Math.round(size) % 2 === 0 ? Math.round((v - off) / g) * g + off : Math.floor((v - off) / g) * g + off + g / 2);
+    const x = snapTo(x0 + (i % perRow) * step, map.grid_offset_x || 0), y = snapTo(y0 + Math.floor(i / perRow) * step, map.grid_offset_y || 0);
+    const r = run(
+      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp) VALUES (?,?,?,?,?,?,?,?,?,?)",
+      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp,
+    );
+    if (m.initiative && m.initiative !== "none") {
+      const init = groupInit ?? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total;
+      state.entries.push({ id: Date.now() + Math.random(), name, init, dex, hidden: !!m.hidden, ownerId: userId, tokenId: Number(r.lastInsertRowid) });
+    }
+  }
+  if (m.initiative && m.initiative !== "none") {
+    state.entries.sort((a, b) => b.init - a.init || (b.dex ?? 0) - (a.dex ?? 0));
+    run("UPDATE campaigns SET initiative = ? WHERE id = ?", JSON.stringify(state), campaignId);
+    postChat(campaignId, null, "text", { text: `🎲 Initiative rolled for ${count} × ${m.name}${groupInit != null ? ` (as a group: ${groupInit})` : ""}.` }, dmId);
+    broadcastInitiative(campaignId);
+  }
+  broadcastMap(campaignId);
+  return count;
+}
+
+/** Average hit points from a hit dice expression like "2d6" or "18d10+36". */
+export function averageHp(expr: string, fallback: number) {
+  const m = String(expr ?? "").replace(/\s/g, "").match(/^(\d+)d(\d+)([+-]\d+)?$/);
+  if (!m) return fallback;
+  return Math.floor(Number(m[1]) * (Number(m[2]) + 1) / 2) + Number(m[3] ?? 0);
 }

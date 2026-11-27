@@ -155,6 +155,14 @@ function EntryEditor({ campaign, entry, close, onDelete }: { campaign: Campaign;
         {entry.status === "draft"
           ? <button className="primary" onClick={() => save("approved")}>Approve</button>
           : <button className="primary" onClick={() => save()}>Save</button>}
+        {campaign.isDM && entry.id && (entry.kind === "monster" || data.statblock) && (
+          <button className="small" onClick={async () => {
+            const n = Number(prompt(`How many ${entry.name} should go on the map? (Initiative is rolled for each.)`, "1"));
+            if (!n) return;
+            try { const r = await api.post(`/campaigns/${campaign.id}/table/monsters`, { entryId: entry.id, count: n }); toast(`Added ${r.added} to the map and initiative`); }
+            catch (e) { toast((e as Error).message); }
+          }}>⚔️ Add to the table</button>
+        )}
         {campaign.isDM && entry.id && (
           <button className="small" onClick={() => api.post(`/campaigns/${campaign.id}/share`, { title: entry.name, text: shareText(entry.kind, data) }).then(() => toast("Shared in chat"))}>Share in chat</button>
         )}
