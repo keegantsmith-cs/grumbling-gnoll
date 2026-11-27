@@ -55,7 +55,7 @@ export function Assistant({ campaign }: { campaign: Campaign }) {
         <div className="row" style={{ marginTop: 8 }}>
           <button className="primary" disabled={busy}>{busy ? "Thinking..." : "Ask"}</button>
           <span className="muted">Ctrl+Enter to send. Leave it blank to be surprised.</span>
-          {usage.data && <span className="muted right" style={{ fontSize: 12 }}>This month: {usage.data.calls} requests ≈ ${usage.data.estimatedUSD.toFixed(2)} ({usage.data.model})</span>}
+          {usage.data && <span className="muted right" style={{ fontSize: 12 }}>All AI this month: {usage.data.calls} requests ≈ ${usage.data.estimatedUSD.toFixed(2)}{usage.data.capUSD ? ` of $${usage.data.capUSD}` : ""} · <a href="#/account">AI settings</a></span>}
         </div>
       </form>
       {error && <div className="error">{error}</div>}

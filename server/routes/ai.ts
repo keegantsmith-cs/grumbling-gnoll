@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { all, one, run } from "../db.ts";
-import { requireUser } from "../auth.ts";
+import { requireAdmin, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError } from "../helpers.ts";
 import { postChat } from "../realtime.ts";
-import { AI_MODEL, ASSIST_KINDS, dmAssist, type AssistKind } from "../ai.ts";
+import { AI_MODEL, ASSIST_KINDS, FEATURES, MODELS, dmAssist, getSetting, modelFor, monthSpend, setSetting, type AssistKind, type Feature } from "../ai.ts";
 
 export const aiRoutes = Router();
 aiRoutes.use(requireUser);
@@ -28,21 +28,48 @@ aiRoutes.get("/campaigns/:id/ai/history", (req, res) => {
   );
 });
 
-// Rough monthly spend so the DM can keep an eye on the budget.
-// Prices are per million tokens; update them if Anthropic's pricing changes.
-const PRICES: Record<string, [number, number]> = {
-  "claude-opus-5-5": [4, 20],
-  "claude-sonnet-5-5": [2, 10],
-  "claude-haiku-5-5": [0.1, 0.5],
-};
-
 aiRoutes.get("/campaigns/:id/ai/usage", (req, res) => {
   campaignAccess(req, true);
-  const row = one(
-    "SELECT COALESCE(SUM(input_tokens),0) AS inTok, COALESCE(SUM(output_tokens),0) AS outTok, COUNT(*) AS calls FROM ai_history WHERE created_at >= date('now','start of month')",
-  )!;
-  const [pin, pout] = PRICES[AI_MODEL] ?? [4, 20];
-  res.json({ model: AI_MODEL, calls: row.calls, inputTokens: row.inTok, outputTokens: row.outTok, estimatedUSD: (row.inTok * pin + row.outTok * pout) / 1e6 });
+  const row = one("SELECT COUNT(*) AS calls FROM ai_history WHERE created_at >= date('now','start of month')")!;
+  res.json({ model: modelFor("assistant"), calls: row.calls, estimatedUSD: monthSpend(), capUSD: Number(getSetting("monthlyCapUSD") || 0) });
+});
+
+// ---- AI settings & costs (admin) ----
+const KIND_FEATURE: Record<string, Feature> = {
+  "character-review": "review", "npc-stats": "review", convert: "reading", adventure: "reading", "sheet-scan": "reading", "map-design": "maps",
+};
+const featureOfKind = (k: string): Feature => KIND_FEATURE[k] ?? "assistant";
+
+aiRoutes.get("/ai/settings", requireAdmin, (_req, res) => {
+  const rows = all("SELECT kind, model, COUNT(*) AS n, SUM(cost_usd) AS cost FROM ai_history WHERE created_at >= date('now','start of month') GROUP BY kind, model");
+  const byFeature: Record<string, { requests: number; cost: number }> = {};
+  for (const r of rows) {
+    const f = featureOfKind(r.kind.replace(/^assist:.*/, "assist"));
+    byFeature[f] ??= { requests: 0, cost: 0 };
+    byFeature[f].requests += r.n;
+    byFeature[f].cost += r.cost ?? 0;
+  }
+  const recent = all("SELECT kind, model, input_tokens AS inputTokens, output_tokens AS outputTokens, cost_usd AS cost, created_at AS createdAt FROM ai_history ORDER BY id DESC LIMIT 40");
+  res.json({
+    models: MODELS,
+    features: FEATURES,
+    selected: Object.fromEntries(Object.keys(FEATURES).map((f) => [f, modelFor(f as Feature)])),
+    defaultModel: AI_MODEL,
+    capUSD: Number(getSetting("monthlyCapUSD") || 0),
+    monthSpend: monthSpend(),
+    byFeature,
+    recent,
+  });
+});
+
+aiRoutes.put("/ai/settings", requireAdmin, (req, res) => {
+  const b = req.body ?? {};
+  for (const f of Object.keys(FEATURES)) {
+    const m = b.selected?.[f];
+    if (typeof m === "string" && MODELS[m]) setSetting(`model.${f}`, m);
+  }
+  if (b.capUSD !== undefined) setSetting("monthlyCapUSD", String(Math.max(0, Number(b.capUSD) || 0)));
+  res.json({ ok: true });
 });
 
 // Share an AI result (or any DM text) with the players in chat

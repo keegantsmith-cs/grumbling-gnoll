@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { useLoad, useStatus } from "../hooks";
+import { AISettings } from "../components/AISettings";
 
 export function Account() {
   const { status, toast } = useStatus();
@@ -21,6 +22,7 @@ export function Account() {
         <label>New password<input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} minLength={8} /></label>
         <button className="primary">Save</button>
       </form>
+      {!!status.user?.is_admin && status.aiEnabled && <AISettings />}
       {!!status.user?.is_admin && (
         <div className="card">
           <h2>Players (admin)</h2>

@@ -2,9 +2,65 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { run } from "./db.ts";
+import { one, run } from "./db.ts";
 
 export const AI_MODEL = process.env.AI_MODEL || "claude-opus-5-5";
+
+// ---------- models, prices and the monthly budget ----------
+
+/** Price per million tokens: [input, output]. Update if Anthropic's prices change. */
+export const MODELS: Record<string, { label: string; price: [number, number]; note: string }> = {
+  "claude-opus-5-5": { label: "Claude Opus 5.5", price: [4, 20], note: "Best quality, most expensive" },
+  "claude-sonnet-5-5": { label: "Claude Sonnet 5.5", price: [2, 10], note: "Very good, about half the price of Opus" },
+  "claude-haiku-5-5": { label: "Claude Haiku 5.5", price: [0.1, 0.5], note: "Good for reading and copying, about 40x cheaper than Opus" },
+};
+
+export const FEATURES = {
+  assistant: "AI Assistant (NPCs, descriptions, encounters...), adventure overviews, portrait prompts",
+  review: "Character rules checks and NPC stat blocks",
+  reading: "Reading PDFs and photos: edition conversion, adventures, paper character sheets",
+  maps: "AI-designed maps",
+} as const;
+export type Feature = keyof typeof FEATURES;
+
+export function getSetting(key: string): string | undefined {
+  return one("SELECT value FROM app_settings WHERE key = ?", key)?.value;
+}
+export function setSetting(key: string, value: string) {
+  run("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+}
+
+export function modelFor(feature: Feature): string {
+  const m = getSetting(`model.${feature}`);
+  return m && MODELS[m] ? m : AI_MODEL;
+}
+
+export function monthSpend(): number {
+  return one("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM ai_history WHERE created_at >= date('now', 'start of month')")!.c;
+}
+
+function checkBudget() {
+  const cap = Number(getSetting("monthlyCapUSD") || 0);
+  if (cap > 0 && monthSpend() >= cap) {
+    throw new AIError(`This month's AI budget ($${cap.toFixed(2)}) has been reached. An admin can raise it in Account > AI settings.`);
+  }
+}
+
+function callParams(feature: Feature) {
+  const model = modelFor(feature);
+  return { model, ...fallbackParams(model) };
+}
+
+type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
+
+export function costOf(model: string, u: Usage): number {
+  const [pin, pout] = MODELS[model]?.price ?? MODELS["claude-opus-5-5"].price;
+  const cacheRead = u.cache_read_input_tokens ?? 0, cacheWrite = u.cache_creation_input_tokens ?? 0;
+  const prompt = u.input_tokens + cacheRead + cacheWrite;
+  // Haiku 5.5 charges 5x more when a single request's prompt is over 100K tokens
+  const mult = model === "claude-haiku-5-5" && prompt > 100_000 ? 5 : 1;
+  return ((u.input_tokens + cacheRead * 0.1 + cacheWrite * 1.25) * pin + u.output_tokens * pout) * mult / 1e6;
+}
 
 let client: Anthropic | null = null;
 export function aiEnabled() {
@@ -12,6 +68,7 @@ export function aiEnabled() {
 }
 function getClient(): Anthropic {
   if (!aiEnabled()) throw new AIError("AI is not set up yet. Add ANTHROPIC_API_KEY to the server's .env file.");
+  checkBudget();
   client ??= new Anthropic();
   return client;
 }
@@ -22,8 +79,8 @@ type Effort = "low" | "medium" | "high";
 
 // Opus 5.5 and Sonnet 5.5 support automatic fallback to another model if a request is
 // declined by a safety classifier (D&D violence occasionally trips these).
-function fallbackParams() {
-  if (/^claude-(opus-5|sonnet-5-5|fable)/.test(AI_MODEL)) {
+function fallbackParams(model: string) {
+  if (/^claude-(opus-5|sonnet-5-5|fable)/.test(model)) {
     return { betas: ["server-side-fallback-2026-07-01"] as string[], fallbacks: "default" as const };
   }
   return { betas: [] as string[] };
@@ -39,16 +96,19 @@ function friendlyError(err: unknown): never {
   throw err;
 }
 
-function logUsage(campaignId: number | null, userId: number | null, kind: string, prompt: string, output: unknown, usage?: { input_tokens: number; output_tokens: number }) {
+function logUsage(campaignId: number | null, userId: number | null, kind: string, prompt: string, output: unknown, msg: { model: string; usage: Usage }) {
+  const u = msg.usage;
   run(
-    "INSERT INTO ai_history (campaign_id, user_id, kind, prompt, output, input_tokens, output_tokens) VALUES (?,?,?,?,?,?,?)",
+    "INSERT INTO ai_history (campaign_id, user_id, kind, prompt, output, input_tokens, output_tokens, model, cost_usd) VALUES (?,?,?,?,?,?,?,?,?)",
     campaignId,
     userId,
     kind,
     prompt,
     typeof output === "string" ? output : JSON.stringify(output),
-    usage?.input_tokens ?? null,
-    usage?.output_tokens ?? null,
+    u.input_tokens + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+    u.output_tokens,
+    msg.model,
+    costOf(msg.model, u),
   );
 }
 
@@ -114,16 +174,15 @@ export async function dmAssist(ctx: CampaignContext, userId: number, kind: Assis
   const prompt = `${KIND_INSTRUCTIONS[kind]}\n\nDM's request: ${request || "(surprise me)"}\n\nFormat the answer in Markdown with short headings. Be concise and usable at the table.`;
   try {
     const msg = await anthropic.beta.messages.create({
-      model: AI_MODEL,
+      ...callParams("assistant"),
       max_tokens: 8000,
-      ...fallbackParams(),
       output_config: { effort: kind === "encounter" || kind === "rules" ? "medium" : "low" },
       system: campaignSystem(ctx),
       messages: [{ role: "user", content: prompt }],
     });
     checkStop(msg);
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
-    logUsage(ctx.id, userId, `assist:${kind}`, request, text, msg.usage);
+    logUsage(ctx.id, userId, `assist:${kind}`, request, text, msg);
     return text;
   } catch (e) {
     friendlyError(e);
@@ -174,16 +233,15 @@ ${opts.previous ? `\nPrevious approved version:\n${JSON.stringify(opts.previous,
 Keep each issue to one or two sentences. If everything is fine, return an empty issues list.`;
   try {
     const msg = await anthropic.beta.messages.parse({
-      model: AI_MODEL,
+      ...callParams("review"),
       max_tokens: 8000,
-      ...fallbackParams(),
       output_config: { effort: "medium", format: betaZodOutputFormat(ReviewSchema) },
       system: campaignSystem(opts.campaign),
       messages: [{ role: "user", content: prompt }],
     });
     checkStop(msg);
     if (!msg.parsed_output) throw new AIError("The AI review came back in an unexpected format. Try again.");
-    logUsage(opts.campaign.id, opts.userId, "character-review", opts.reason, msg.parsed_output, msg.usage);
+    logUsage(opts.campaign.id, opts.userId, "character-review", opts.reason, msg.parsed_output, msg);
     return msg.parsed_output;
   } catch (e) {
     friendlyError(e);
@@ -279,10 +337,9 @@ export async function convertPdfChunk(opts: {
   try {
     // Streaming keeps long conversions from hitting HTTP timeouts.
     const stream = anthropic.beta.messages.stream({
-      model: AI_MODEL,
+      ...callParams("reading"),
       max_tokens: 64000,
-      ...fallbackParams(),
-      output_config: { effort: "medium", format: betaZodOutputFormat(ConversionSchema) },
+      output_config: { effort: "low", format: betaZodOutputFormat(ConversionSchema) },
       system: `${BASE_SYSTEM}\n\nYou convert monsters and magic items from older or different tabletop RPG editions into D&D 5th Edition (${opts.targetRules} rules) for a DM's private use.\n\n${CONVERT_GUIDE}`,
       messages: [
         {
@@ -306,7 +363,7 @@ Put the original page number in source_page.`,
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const parsed = ConversionSchema.safeParse(JSON.parse(text));
     if (!parsed.success) throw new AIError("The AI's conversion came back in an unexpected format.");
-    logUsage(opts.campaignId, opts.userId, "convert", `${opts.edition} ${opts.pageLabel}`, { monsters: parsed.data.monsters.length, items: parsed.data.items.length }, msg.usage);
+    logUsage(opts.campaignId, opts.userId, "convert", `${opts.edition} ${opts.pageLabel}`, { monsters: parsed.data.monsters.length, items: parsed.data.items.length }, msg);
     return { result: parsed.data, usage: msg.usage };
   } catch (e) {
     if (e instanceof SyntaxError) throw new AIError("The AI's conversion came back incomplete. Try a smaller page range.");
@@ -348,16 +405,15 @@ Rules for the layout:
 - For each area write a short read-aloud description and DM notes (creatures, traps with DCs, treasure, clues) suitable for the party.`;
   try {
     const msg = await anthropic.beta.messages.parse({
-      model: AI_MODEL,
+      ...callParams("maps"),
       max_tokens: 16000,
-      ...fallbackParams(),
       output_config: { effort: "medium", format: betaZodOutputFormat(MapDesignSchema) },
       system: campaignSystem(ctx),
       messages: [{ role: "user", content: prompt }],
     });
     checkStop(msg);
     if (!msg.parsed_output) throw new AIError("The AI map design came back in an unexpected format. Try again.");
-    logUsage(ctx.id, userId, "map-design", description, { rooms: msg.parsed_output.rooms.length }, msg.usage);
+    logUsage(ctx.id, userId, "map-design", description, { rooms: msg.parsed_output.rooms.length }, msg);
     return msg.parsed_output;
   } catch (e) {
     friendlyError(e);
@@ -431,10 +487,9 @@ The campaign uses the ${opts.rulesVersion} 5e rules (for context only; copy the 
   });
   try {
     const stream = anthropic.beta.messages.stream({
-      model: AI_MODEL,
+      ...callParams("reading"),
       max_tokens: 32000,
-      ...fallbackParams(),
-      output_config: { effort: "medium", format: betaZodOutputFormat(SheetSchema) },
+      output_config: { effort: "low", format: betaZodOutputFormat(SheetSchema) },
       system: BASE_SYSTEM,
       messages: [{ role: "user", content }],
     });
@@ -443,7 +498,7 @@ The campaign uses the ${opts.rulesVersion} 5e rules (for context only; copy the 
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const parsed = SheetSchema.safeParse(JSON.parse(text));
     if (!parsed.success) throw new AIError("The AI couldn't make sense of that sheet. Try clearer photos.");
-    logUsage(opts.campaignId, opts.userId, "sheet-scan", `${opts.files.length} file(s)`, { name: parsed.data.name }, msg.usage);
+    logUsage(opts.campaignId, opts.userId, "sheet-scan", `${opts.files.length} file(s)`, { name: parsed.data.name }, msg);
     return parsed.data;
   } catch (e) {
     if (e instanceof SyntaxError) throw new AIError("The AI's reading of the sheet came back incomplete. Try again, or upload fewer pages.");
@@ -459,9 +514,8 @@ export async function characterArtPrompt(campaignId: number | null, userId: numb
   const info = `Name: ${c.name}\nSpecies: ${c.species}\nClass: ${c.classes.map((x) => `${x.name}${x.subclass ? ` (${x.subclass})` : ""} ${x.level}`).join(" / ")}\nBackground: ${c.background}\nEquipped gear: ${gear}\nPersonality: ${c.personality.slice(0, 1500)}\nBackstory: ${c.backstory.slice(0, 2500)}`;
   try {
     const msg = await anthropic.beta.messages.create({
-      model: AI_MODEL,
+      ...callParams("assistant"),
       max_tokens: 2000,
-      ...fallbackParams(),
       output_config: { effort: "low" },
       messages: [{
         role: "user",
@@ -470,7 +524,7 @@ export async function characterArtPrompt(campaignId: number | null, userId: numb
     });
     checkStop(msg);
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
-    logUsage(campaignId, userId, "art-prompt", c.name, text, msg.usage);
+    logUsage(campaignId, userId, "art-prompt", c.name, text, msg);
     return text;
   } catch (e) {
     friendlyError(e);
@@ -514,10 +568,9 @@ export async function readAdventureChunk(opts: {
   const is5e = /^5e/i.test(opts.edition);
   try {
     const stream = anthropic.beta.messages.stream({
-      model: AI_MODEL,
+      ...callParams("reading"),
       max_tokens: 64000,
-      ...fallbackParams(),
-      output_config: { effort: "medium", format: betaZodOutputFormat(AdventureChunkSchema) },
+      output_config: { effort: "low", format: betaZodOutputFormat(AdventureChunkSchema) },
       system: `${BASE_SYSTEM}\n\nYou are preparing a DM's private run-guide for an adventure module they own, to be played with D&D 5th Edition (${opts.targetRules} rules).${is5e ? "" : `\n\nThe adventure was written for ${opts.edition}, so convert its monsters and items to 5e.\n\n${CONVERT_GUIDE}`}`,
       messages: [{
         role: "user",
@@ -550,7 +603,7 @@ Skip front matter, credits, ads, and the table of contents. Use empty lists when
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const parsed = AdventureChunkSchema.safeParse(JSON.parse(text));
     if (!parsed.success) throw new AIError("The AI's reading of those pages came back in an unexpected format.");
-    logUsage(opts.campaignId, opts.userId, "adventure", `${opts.title} ${opts.pageLabel}`, { sections: parsed.data.sections.length }, msg.usage);
+    logUsage(opts.campaignId, opts.userId, "adventure", `${opts.title} ${opts.pageLabel}`, { sections: parsed.data.sections.length }, msg);
     return parsed.data;
   } catch (e) {
     if (e instanceof SyntaxError) throw new AIError("The AI's reading came back incomplete. Retry and it will continue from where it stopped.");
@@ -562,9 +615,8 @@ export async function adventureSynopsis(ctx: CampaignContext, userId: number, ti
   const anthropic = getClient();
   try {
     const msg = await anthropic.beta.messages.create({
-      model: AI_MODEL,
+      ...callParams("assistant"),
       max_tokens: 8000,
-      ...fallbackParams(),
       output_config: { effort: "low" },
       system: campaignSystem(ctx),
       messages: [{
@@ -574,7 +626,7 @@ export async function adventureSynopsis(ctx: CampaignContext, userId: number, ti
     });
     checkStop(msg);
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
-    logUsage(ctx.id, userId, "adventure-synopsis", title, text, msg.usage);
+    logUsage(ctx.id, userId, "adventure-synopsis", title, text, msg);
     return text;
   } catch (e) {
     friendlyError(e);
@@ -587,9 +639,8 @@ export async function npcStatBlock(ctx: CampaignContext, userId: number, npcText
   const anthropic = getClient();
   try {
     const msg = await anthropic.beta.messages.parse({
-      model: AI_MODEL,
+      ...callParams("review"),
       max_tokens: 16000,
-      ...fallbackParams(),
       output_config: { effort: "medium", format: betaZodOutputFormat(MonsterSchema) },
       system: campaignSystem(ctx),
       messages: [{
@@ -601,7 +652,7 @@ Make it fit who they are (a scholar shouldn't fight like a knight). Pick a chall
     });
     checkStop(msg);
     if (!msg.parsed_output) throw new AIError("The stat block came back in an unexpected format. Try again.");
-    logUsage(ctx.id, userId, "npc-stats", npcText.slice(0, 100), { name: msg.parsed_output.name }, msg.usage);
+    logUsage(ctx.id, userId, "npc-stats", npcText.slice(0, 100), { name: msg.parsed_output.name }, msg);
     return msg.parsed_output;
   } catch (e) {
     friendlyError(e);

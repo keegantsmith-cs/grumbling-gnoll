@@ -49,7 +49,7 @@ Voice chat is meant to happen in Discord, alongside the site.
    systemctl restart grumbling-gnoll
    ```
 
-**Costs:** the default model (`claude-opus-5-5`) gives the best results. A typical DM request costs a cent or two, a character check 2–5¢, and a converted PDF page about 3–6¢. The AI Assistant tab shows a running monthly estimate. For lower costs, set `AI_MODEL=claude-haiku-5-5` in `.env` (much cheaper, somewhat less capable) and restart. You can also set a monthly spending limit in the Claude Console.
+**Costs:** as admin, go to **Account → AI settings & costs** to choose which Claude model does each job, see what each request cost, and set a monthly limit. The "Balanced" choice (Haiku reads PDFs and photos, Sonnet writes and checks) costs a fraction of using Opus for everything. You can also set a spending limit in the Claude Console.
 
 ### Updating after new code is pushed
 

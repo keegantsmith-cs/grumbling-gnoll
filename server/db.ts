@@ -247,3 +247,9 @@ CREATE TABLE IF NOT EXISTS adventure_maps (
   map_id INTEGER REFERENCES maps(id) ON DELETE SET NULL
 );
 `);
+
+db.exec(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+addColumn("ai_history", "model", "TEXT");
+addColumn("ai_history", "cost_usd", "REAL");
+// Older rows: estimate cost at Opus prices so this month's total isn't zero
+db.exec(`UPDATE ai_history SET cost_usd = (COALESCE(input_tokens,0) * 4 + COALESCE(output_tokens,0) * 20) / 1000000.0, model = COALESCE(model, 'claude-opus-5-5') WHERE cost_usd IS NULL`);
