@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { useLoad, useStatus } from "../hooks";
 import { AISettings } from "../components/AISettings";
+import { DICE_STYLES, DiePreview, announceRoll, DiceTray } from "../components/DiceTray";
 
 export function Account() {
   const { status, toast } = useStatus();
@@ -22,6 +23,7 @@ export function Account() {
         <label>New password<input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} minLength={8} /></label>
         <button className="primary">Save</button>
       </form>
+      <DiceBag />
       {!!status.user?.is_admin && status.aiEnabled && <AISettings />}
       {!!status.user?.is_admin && (
         <div className="card">
@@ -41,6 +43,32 @@ export function Account() {
           </tbody></table>
         </div>
       )}
+    </div>
+  );
+}
+
+function DiceBag() {
+  const { status, refresh, toast } = useStatus();
+  const [style, setStyle] = useState(status.user?.dice_style ?? "ruby");
+  const pick = async (k: string) => {
+    setStyle(k);
+    try { await api.post("/me/dice", { style: k }); refresh(); } catch (e) { toast((e as Error).message); }
+    announceRoll({ name: status.user!.display_name, body: { expression: "test", label: `${DICE_STYLES[k].label} dice`, total: "✓", style: k,
+      dice: [4, 6, 8, 10, 12, 20].map((s) => ({ sides: s, value: s, kept: true })) } });
+  };
+  return (
+    <div className="card">
+      <DiceTray />
+      <h2>🎲 Your dice</h2>
+      <p className="muted">Pick the dice you roll with. Everyone at the table sees your rolls in this style.</p>
+      <div className="row">
+        {Object.entries(DICE_STYLES).map(([k, s]) => (
+          <button key={k} className={style === k ? "active" : ""} onClick={() => pick(k)} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 6, minWidth: 92 }}>
+            <DiePreview style={k} />
+            <span style={{ fontSize: 12 }}>{s.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

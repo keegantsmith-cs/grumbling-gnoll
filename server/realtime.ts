@@ -3,7 +3,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import { all, one, parseJSON, run, type Row } from "./db.ts";
 import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
-import { describeRoll, rollDice } from "../shared/dice.ts";
+import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
 
 let io: Server;
@@ -109,6 +109,10 @@ function initiativeFor(state: { round: number; turn: number; entries: Row[] }, i
 }
 
 export function postChat(campaignId: number, userId: number | null, kind: string, body: unknown, whisperTo: number | null = null) {
+  // Rolls carry the roller's chosen dice look, so everyone sees their dice the way they picked
+  if (kind === "roll" && userId && body && typeof body === "object") {
+    (body as Record<string, unknown>).style = one("SELECT dice_style FROM users WHERE id = ?", userId)?.dice_style ?? "ruby";
+  }
   const r = run("INSERT INTO chat (campaign_id, user_id, kind, body, whisper_to) VALUES (?,?,?,?,?)", campaignId, userId, kind, JSON.stringify(body), whisperTo);
   const row = one("SELECT c.*, u.display_name AS name FROM chat c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?", r.lastInsertRowid)!;
   const msg = chatOut(row);
@@ -146,7 +150,7 @@ function dmIdOf(campaignId: number): number {
 function doRoll(campaignId: number, userId: number, expr: string, label: string, whisperTo: number | null, socket: Socket) {
   try {
     const r = rollDice(expr);
-    postChat(campaignId, userId, "roll", { expression: r.expression, label, total: r.total, detail: describeRoll(r), crit: r.crit }, whisperTo);
+    postChat(campaignId, userId, "roll", { expression: r.expression, label, total: r.total, detail: describeRoll(r), crit: r.crit, dice: diceList(r) }, whisperTo);
   } catch (e) {
     socket.emit("toast", (e as Error).message);
   }
@@ -349,7 +353,7 @@ export function initRealtime(server: HttpServer) {
         const r = rollDice(`1d20${bonus >= 0 ? "+" : ""}${bonus}`);
         const name = String(p.name ?? d.user.display_name).slice(0, 60);
         const hidden = d.isDM && !!p.hidden;
-        postChat(d.campaignId, d.user.id, "roll", { expression: r.expression, label: `${name} initiative`, total: r.total, detail: describeRoll(r), crit: r.crit }, hidden ? dmIdOf(d.campaignId) : null);
+        postChat(d.campaignId, d.user.id, "roll", { expression: r.expression, label: `${name} initiative`, total: r.total, detail: describeRoll(r), crit: r.crit, dice: diceList(r) }, hidden ? dmIdOf(d.campaignId) : null);
         state.entries = state.entries.filter((e) => !(e.ownerId === d.user.id && e.name === name));
         state.entries.push({ id: Date.now() + Math.random(), name, init: r.total, dex: bonus, hidden, ownerId: d.user.id, tokenId: p.tokenId ?? null });
         sortEntries();

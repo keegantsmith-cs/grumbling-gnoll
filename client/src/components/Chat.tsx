@@ -3,12 +3,15 @@ import type { CampaignSocket, ChatMsg } from "../socket";
 import type { Campaign } from "../pages/Campaign";
 import { Markdown } from "./Markdown";
 import { useStatus } from "../hooks";
+import { diceSettings } from "./DiceTray";
 
 const DICE = ["d4", "d6", "d8", "d10", "d12", "d20", "d100"];
 
 export function ChatPanel({ campaign, live }: { campaign: Campaign; live: CampaignSocket }) {
   const [text, setText] = useState("");
   const [secret, setSecret] = useState(false);
+  const [anim, setAnim] = useState(diceSettings.animation);
+  const [sound, setSound] = useState(diceSettings.sound);
   const logRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = logRef.current;
@@ -33,7 +36,9 @@ export function ChatPanel({ campaign, live }: { campaign: Campaign; live: Campai
         {DICE.map((d) => <button key={d} onClick={() => roll(`1${d}`)}>{d}</button>)}
         <button onClick={() => roll("2d20kh1", "advantage")} title="Roll with advantage">adv</button>
         <button onClick={() => roll("2d20kl1", "disadvantage")} title="Roll with disadvantage">dis</button>
-        <label className="inline" style={{ marginLeft: "auto", fontSize: 12 }} title={campaign.isDM ? "Only you see the roll" : "Only you and the DM see the roll"}>
+        <button title={anim ? "Turn off dice animation" : "Turn on dice animation"} style={{ marginLeft: "auto", opacity: anim ? 1 : 0.5 }} onClick={() => { diceSettings.animation = !anim; setAnim(!anim); }}>✨</button>
+        <button title={sound ? "Mute dice sound" : "Turn on dice sound"} style={{ opacity: anim && sound ? 1 : 0.5 }} onClick={() => { diceSettings.sound = !sound; setSound(!sound); }}>{sound ? "🔊" : "🔇"}</button>
+        <label className="inline" style={{ fontSize: 12 }} title={campaign.isDM ? "Only you see the roll" : "Only you and the DM see the roll"}>
           <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /> secret
         </label>
       </div>

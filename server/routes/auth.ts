@@ -54,6 +54,14 @@ authRoutes.post("/me/password", requireUser, (req, res) => {
   res.json({ ok: true });
 });
 
+export const DICE_STYLES = ["ruby", "obsidian", "bone", "gold", "emerald", "sapphire", "amethyst", "wood", "ice", "galaxy"];
+authRoutes.post("/me/dice", requireUser, (req, res) => {
+  const style = String(req.body?.style ?? "");
+  if (!DICE_STYLES.includes(style)) throw new HttpError(400, "Unknown dice style");
+  run("UPDATE users SET dice_style = ? WHERE id = ?", style, req.user!.id);
+  res.json({ ok: true });
+});
+
 authRoutes.get("/users", requireUser, (_req, res) => {
   res.json(all("SELECT id, username, display_name AS displayName, is_admin AS isAdmin FROM users ORDER BY display_name"));
 });

@@ -10,6 +10,7 @@ import { Assistant } from "./Assistant";
 import { Converter } from "./Converter";
 import { Settings } from "./Settings";
 import { Adventures } from "./Adventures";
+import { DiceTray } from "../components/DiceTray";
 
 export interface Campaign {
   id: number; name: string; description: string; rulesVersion: "2014" | "2024"; dmUserId: number; dmName: string;
@@ -47,6 +48,7 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
 
   return (
     <>
+      <DiceTray />
       <div className="tabs">
         <span className="brand" style={{ alignSelf: "center", marginRight: 12, whiteSpace: "nowrap" }}>{campaign.name}</span>
         {tabs.map(([k, label, count]) => (

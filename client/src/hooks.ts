@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "./api";
 
-export interface User { id: number; username: string; display_name: string; is_admin: number }
+export interface User { id: number; username: string; display_name: string; is_admin: number; dice_style?: string }
 export interface Status { needsSetup: boolean; aiEnabled: boolean; aiModel: string; user: User | null }
 
 export const StatusContext = createContext<{ status: Status; refresh: () => void; toast: (m: string) => void }>(null!);

@@ -28,7 +28,7 @@ export function createSession(userId: number): string {
 export function userFromToken(token: string | undefined): Row | undefined {
   if (!token) return undefined;
   const user = one(
-    `SELECT u.id, u.username, u.display_name, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id
+    `SELECT u.id, u.username, u.display_name, u.is_admin, u.dice_style FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > ?`,
     token,
     Date.now(),

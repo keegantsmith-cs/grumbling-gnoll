@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
+import { announceRoll } from "./components/DiceTray";
 
 export interface Token {
   id: number; name: string; x: number; y: number; size: number; color: string; imageUrl: string | null;
@@ -40,7 +41,10 @@ export function useCampaignSocket(campaignId: number, onToast: (m: string) => vo
       setMap((m) => (m ? { ...m, tokens: m.tokens.map((t) => (t.id === p.id ? { ...t, x: p.x, y: p.y } : t)) } : m)));
     s.on("fog", (fog: FogShape[]) => setMap((m) => (m ? { ...m, fog } : m)));
     s.on("chatHistory", setChat);
-    s.on("chat", (msg: ChatMsg) => setChat((c) => [...c.slice(-300), msg]));
+    s.on("chat", (msg: ChatMsg) => {
+      setChat((c) => [...c.slice(-300), msg]);
+      if (msg.kind === "roll") announceRoll({ name: msg.name, body: msg.body });
+    });
     s.on("initiative", setInitiative);
     s.on("presence", setPresence);
     s.on("toast", (m: string) => toastRef.current(m));

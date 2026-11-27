@@ -97,3 +97,12 @@ export function describeRoll(r: RollResult): string {
     })
     .join(" ");
 }
+
+export interface RolledDie { sides: number; value: number; kept: boolean }
+
+/** Every individual die in a roll, for the on-screen dice animation (capped so huge rolls stay readable). */
+export function diceList(r: RollResult, max = 30): RolledDie[] {
+  const out: RolledDie[] = [];
+  for (const p of r.parts) if (p.kind === "dice") p.rolls.forEach((v, i) => out.push({ sides: p.sides, value: v, kept: p.kept[i] }));
+  return out.slice(0, max);
+}

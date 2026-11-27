@@ -266,3 +266,4 @@ CREATE TABLE IF NOT EXISTS character_rolls (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+addColumn("users", "dice_style", "TEXT NOT NULL DEFAULT 'ruby'");
