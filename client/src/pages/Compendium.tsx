@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { EntryView } from "../components/StatBlock";
+import { Duplicates } from "../components/Duplicates";
 
 const KIND_LABEL: Record<string, string> = { monster: "Monsters", item: "Magic items", npc: "NPCs", note: "Notes & handouts" };
 
@@ -14,6 +15,7 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
   const [onlyDrafts, setOnlyDrafts] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [newKind, setNewKind] = useState<string | null>(null);
+  const [dupes, setDupes] = useState(false);
   useEffect(() => { if (changed.what === "compendium") list.reload(); }, [changed]);
 
   const shown = useMemo(() => (list.data ?? []).filter((e) =>
@@ -25,6 +27,7 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
     <div>
       <div className="row">
         <h1 className="grow">Compendium</h1>
+        {campaign.isDM && <button onClick={() => setDupes(!dupes)}>🧹 Find duplicates</button>}
         {campaign.isDM && <select style={{ width: "auto" }} value="" onChange={(e) => setNewKind(e.target.value || null)}>
           <option value="">+ Add entry...</option>
           <option value="monster">Monster</option><option value="item">Magic item</option><option value="npc">NPC</option><option value="note">Note / handout</option>
@@ -32,6 +35,7 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
       </div>
       <p className="muted">{campaign.isDM ? "Monsters, items, NPCs and notes for this campaign. Players only see entries you mark \"Players can see\"." : "Things your DM has shared with the party."}</p>
       {campaign.isDM && drafts > 0 && <div className="notice">{drafts} converted entr{drafts === 1 ? "y is" : "ies are"} waiting for review. <button className="link" onClick={() => setOnlyDrafts(true)}>Show drafts</button>{" · "}<button className="link" onClick={() => confirm(`Approve all ${drafts} drafts without reviewing each one?`) && api.post(`/campaigns/${campaign.id}/compendium/approve-all`, {}).then(() => { list.reload(); toast("All drafts approved"); })}>Approve all</button></div>}
+      {dupes && campaign.isDM && <Duplicates campaignId={campaign.id} onChanged={() => { list.reload(); setOpenId(null); }} close={() => setDupes(false)} />}
       {newKind && <EntryEditor campaign={campaign} entry={{ kind: newKind, name: "", data: blankData(newKind), status: "approved", playerVisible: false }} close={() => { setNewKind(null); list.reload(); }} />}
       <div className="row" style={{ marginBottom: 10 }}>
         <input className="grow" placeholder="Search..." value={q} onChange={(e) => setQ(e.target.value)} />

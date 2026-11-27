@@ -79,6 +79,35 @@ compendiumRoutes.post("/campaigns/:id/compendium/approve-all", (req, res) => {
   res.json({ approved: r.changes });
 });
 
+// ---- duplicates ----
+const filled = (d: Record<string, unknown>) => Object.values(d ?? {}).filter((v) => v !== "" && v != null && !(Array.isArray(v) && !v.length)).length;
+const score = (e: { status: string; data: Record<string, any> }) => filled(e.data) + (e.status === "approved" ? 2 : 0) + (e.data?.statblock ? 5 : 0);
+const normName = (n: string) => n.toLowerCase().replace(/^(the|a|an)\s+/, "").replace(/[^a-z0-9]+/g, "");
+
+compendiumRoutes.get("/campaigns/:id/compendium/duplicates", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const rows = all("SELECT * FROM compendium WHERE campaign_id = ?", id).map(entryOut);
+  const groups = new Map<string, ReturnType<typeof entryOut>[]>();
+  for (const e of rows) {
+    const key = `${e.kind}:${normName(e.name)}`;
+    groups.set(key, [...(groups.get(key) ?? []), e]);
+  }
+  const out = [...groups.values()].filter((g) => g.length > 1).map((g) =>
+    // Best one first: the most filled-in (approved entries get a head start), then the newest
+    g.sort((a, b) => score(b) - score(a) || b.createdAt.localeCompare(a.createdAt)),
+  );
+  res.json(out.sort((a, b) => a[0].name.localeCompare(b[0].name)));
+});
+
+compendiumRoutes.post("/campaigns/:id/compendium/delete-many", (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const ids: number[] = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite).slice(0, 1000) : [];
+  let deleted = 0;
+  for (const eid of ids) deleted += run("DELETE FROM compendium WHERE id = ? AND campaign_id = ?", eid, id).changes;
+  notify(id, "compendium");
+  res.json({ deleted });
+});
+
 compendiumRoutes.patch("/compendium/:entryId", (req, res) => {
   const e = loadEntry(num(req.params.entryId), req.user!.id);
   const b = req.body ?? {};
