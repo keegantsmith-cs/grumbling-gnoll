@@ -82,7 +82,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Then open <http://localhost:5173>. `npm run typecheck` checks the code. `npm run build` followed by `npm start` runs the production build on port 3000.
+Then open <http://localhost:5173>. `npm run typecheck` checks the code and `npm test` runs the automated tests (they also run on GitHub after every push). `npm run build` followed by `npm start` runs the production build on port 3000.
 
 **Layout:**
 - `server/`: Express + Socket.IO + SQLite. `server/ai.ts` holds all Claude prompts.
