@@ -807,11 +807,11 @@ export const CustomSpellSchema = z.object({
   source_page: z.string(),
 });
 
-export async function describeThing(ctx: CampaignContext, userId: number, kind: "item" | "spell", name: string, hint: string) {
+export async function describeThing(ctx: CampaignContext, userId: number, kind: "item" | "spell", name: string, hint: string, related = "") {
   const anthropic = getClient();
   const schema = kind === "spell" ? CustomSpellSchema : ItemSchema;
   const prompt = `Write a D&D 5th Edition (${ctx.rulesVersion} rules) ${kind === "spell" ? "spell" : "magic item or piece of equipment"} entry for "${name}" for this group's private campaign reference.
-${hint ? `The player/DM says: ${hint}\n` : ""}
+${hint ? `The player/DM says: ${hint}\n` : ""}${related ? `\nSimilar entries already in this campaign's Compendium (for example converted from the group's own books). If one of them IS this ${kind}, base the entry on it and say so in source_page; otherwise use them for consistency:\n${related}\n` : ""}
 - If this is a known published ${kind}, summarize how it works accurately and completely, in your own words (don't quote books). Put the book it comes from in source_page if you know it.
 - If you don't recognize it, design a balanced version that fits the name, and say clearly in conversion_notes that it's a suggestion for the DM to check.
 - description: everything needed to use it at the table (what it does, actions, charges, duration, limits).

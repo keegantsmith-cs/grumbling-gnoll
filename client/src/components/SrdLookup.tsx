@@ -6,6 +6,19 @@ import { api } from "../api";
 import { Markdown } from "./Markdown";
 
 export type SrdType = "spell" | "equipment" | "magic" | "monster";
+
+/** Which campaign the sheet belongs to, so lookups can include the campaign's own Compendium. */
+export const LookupCampaign = createContext<number | null>(null);
+
+/** Turn a campaign Compendium entry into the same shape as an SRD result. */
+function fromCompendium(e: any): SrdEntry {
+  const d = e.data ?? {};
+  if (e.kind === "spell") {
+    return { type: "spell", name: e.name, level: Number(d.level) || 0, school: d.school ?? "", castingTime: d.casting_time ?? "", range: d.range ?? "", components: d.components ?? "",
+      duration: d.duration ?? "", desc: d.description ?? "", higher: d.higher_levels ?? "", attack: "", save: "", damage: "", damageType: "", classes: [], fromCampaign: true, draft: e.status === "draft" };
+  }
+  return { type: "magic", name: e.name, rarity: d.rarity ?? "", category: d.item_type ?? "", attunement: !!d.requires_attunement, desc: d.description ?? "", fromCampaign: true, draft: e.status === "draft" };
+}
 export interface SrdEntry { name: string; type: SrdType; [k: string]: any }
 
 /** A text box that suggests SRD entries while typing. Typing anything else (homebrew) still works. */
@@ -13,6 +26,7 @@ export function SrdInput({ value, onChange, onPick, types, filter, placeholder, 
   value: string; onChange: (v: string) => void; onPick: (e: SrdEntry) => void; types: SrdType[]; filter?: string;
   placeholder?: string; className?: string; style?: React.CSSProperties;
 }) {
+  const campaignId = useContext(LookupCampaign);
   const [results, setResults] = useState<SrdEntry[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -22,9 +36,17 @@ export function SrdInput({ value, onChange, onPick, types, filter, placeholder, 
     if (!open || value.trim().length < 2) { setResults([]); return; }
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
-      api.get<SrdEntry[]>(`/srd/search?type=${types.join(",")}&q=${encodeURIComponent(value)}&limit=8${filter ? `&filter=${filter}` : ""}`)
-        .then((r) => { setResults(r); setActive(0); })
-        .catch(() => setResults([]));
+      // The campaign's own Compendium (converted books, adventures, homebrew) comes first, then the SRD
+      const kinds = [...new Set(types.map((t) => (t === "spell" ? "spell" : t === "monster" ? "" : "item")).filter(Boolean))];
+      const mine = campaignId && kinds.length
+        ? api.get<any[]>(`/campaigns/${campaignId}/compendium/search?kind=${kinds.join(",")}&q=${encodeURIComponent(value)}&limit=5`).then((r) => r.map(fromCompendium)).catch(() => [])
+        : Promise.resolve([] as SrdEntry[]);
+      const srd = api.get<SrdEntry[]>(`/srd/search?type=${types.join(",")}&q=${encodeURIComponent(value)}&limit=8${filter ? `&filter=${filter}` : ""}`).catch(() => [] as SrdEntry[]);
+      Promise.all([mine, srd]).then(([a, b]) => {
+        const names = new Set(a.map((x) => x.name.toLowerCase()));
+        setResults([...a, ...b.filter((x) => !names.has(x.name.toLowerCase()))].slice(0, 10));
+        setActive(0);
+      });
     }, 150);
   }, [value, open, types.join(","), filter]);
 
@@ -47,10 +69,10 @@ export function SrdInput({ value, onChange, onPick, types, filter, placeholder, 
           {results.map((r, i) => (
             <div key={r.type + r.name} onMouseDown={() => pick(r)} onMouseEnter={() => setActive(i)}
               style={{ padding: "5px 8px", cursor: "pointer", background: i === active ? "var(--panel-2)" : undefined }}>
-              <b>{r.name}</b> <span className="muted" style={{ fontSize: 12 }}>{describe(r)}</span>
+              <b>{r.name}</b> {r.fromCampaign && <span className="pill ok" style={{ fontSize: 10 }}>{r.draft ? "campaign draft" : "campaign"}</span>} <span className="muted" style={{ fontSize: 12 }}>{describe(r)}</span>
             </div>
           ))}
-          <div className="muted" style={{ fontSize: 10, padding: "3px 8px" }}>From the free 5e SRD 5.1 (CC-BY-4.0)</div>
+          <div className="muted" style={{ fontSize: 10, padding: "3px 8px" }}>"campaign" = your Compendium · others from the free 5e SRD 5.1 (CC-BY-4.0)</div>
         </div>
       )}
     </span>
@@ -68,9 +90,6 @@ export function describe(r: SrdEntry): string {
 export function spellSummary(s: SrdEntry) {
   return [s.castingTime, s.range, s.attack ? `${s.attack} spell attack` : s.save ? `${s.save} save` : "", s.damage ? `${s.damage} ${String(s.damageType).toLowerCase()}` : "", s.duration !== "Instantaneous" ? s.duration : ""].filter(Boolean).join(" · ");
 }
-
-/** Which campaign the sheet belongs to, so lookups can include the campaign's own Compendium. */
-export const LookupCampaign = createContext<number | null>(null);
 
 /** "ⓘ" button: shows the campaign's own entry, else the SRD text, else lets you add the details. */
 export function SrdInfo({ type, name }: { type: SrdType; name: string }) {
@@ -139,7 +158,12 @@ function AddDetails({ campaignId, kind, name, onSaved }: { campaignId: number; k
     : { name, level: 1, school: "", casting_time: "1 action", range: "", components: "V, S", duration: "Instantaneous", description: "", higher_levels: "", conversion_notes: "", source_page: "" });
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
+  const [similar, setSimilar] = useState<any[]>([]);
+  const [peek, setPeek] = useState<any | null>(null);
   const set = (k: string, v: unknown) => setF({ ...f, [k]: v });
+  useEffect(() => {
+    api.get<any[]>(`/campaigns/${campaignId}/compendium/search?kind=${kind}&q=${encodeURIComponent(name)}&loose=1&limit=5`).then(setSimilar).catch(() => {});
+  }, [campaignId, kind, name]);
 
   async function draft() {
     setBusy(true);
@@ -157,7 +181,21 @@ function AddDetails({ campaignId, kind, name, onSaved }: { campaignId: number; k
 
   return (
     <div>
-      <p className="muted">"{name}" isn't in the free SRD. It may be from another book or homebrew. Add its details so everyone in the campaign can look it up.</p>
+      <p className="muted">"{name}" isn't in the free SRD{similar.length ? " or exactly in your Compendium" : ""}. It may be from another book or homebrew. Add its details so everyone in the campaign can look it up.</p>
+      {similar.length > 0 && (
+        <div className="card" style={{ background: "var(--panel-2)", padding: 10 }}>
+          <b style={{ fontSize: 13 }}>Similar entries in your Compendium</b>
+          {similar.map((s) => (
+            <div key={s.id} className="row" style={{ marginTop: 4 }}>
+              <span className="grow">{s.name} <span className="muted" style={{ fontSize: 12 }}>{s.source}{s.status === "draft" ? " · draft" : ""}</span></span>
+              <button className="small" onClick={() => setPeek(peek?.id === s.id ? null : s)}>{peek?.id === s.id ? "Hide" : "View"}</button>
+              <button className="small" onClick={() => setF({ ...f, ...s.data, name: f.name })} title="Copy its details into the form, keeping your name">Use as a starting point</button>
+            </div>
+          ))}
+          {peek && <div style={{ marginTop: 8 }}><EntryView e={peek} /></div>}
+          <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>The AI draft also reads these, so converted-PDF details are used instead of guesses.</p>
+        </div>
+      )}
       {status.aiEnabled && (
         <div className="row" style={{ marginBottom: 8 }}>
           <input className="grow" value={hint} onChange={(e) => setHint(e.target.value)} placeholder="Optional hint for the AI: book, what it does..." />

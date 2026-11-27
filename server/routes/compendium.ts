@@ -97,6 +97,29 @@ compendiumRoutes.get("/campaigns/:id/compendium/lookup", (req, res) => {
   res.json(e ? entryOut(e) : null);
 });
 
+/** Search the campaign's Compendium by words (for sheet suggestions and "similar entries"). */
+function searchVisible(campaignId: number, userId: number, isDM: boolean, kinds: string[], q: string, limit: number) {
+  const words = lookupName(q);
+  if (!words.length) return [];
+  const rows = all(`SELECT * FROM compendium WHERE campaign_id = ? AND kind IN (${kinds.map(() => "?").join(",")})`, campaignId, ...kinds)
+    .filter((e) => isDM || (e.status === "approved" && e.player_visible) || e.created_by === userId);
+  const scored = rows.map((e) => {
+    const n = lookupName(e.name).join(" ");
+    const hits = words.filter((w) => n.includes(w)).length;
+    return { e, score: hits / words.length + (n.startsWith(words[0]) ? 0.2 : 0) };
+  }).filter((x) => x.score > 0);
+  return scored.sort((a, b) => b.score - a.score || a.e.name.length - b.e.name.length).slice(0, limit).map((x) => ({ ...entryOut(x.e), match: x.score }));
+}
+
+compendiumRoutes.get("/campaigns/:id/compendium/search", (req, res) => {
+  const { id, isDM } = campaignAccess(req);
+  const kinds = String(req.query.kind ?? "item").split(",").filter((k) => KINDS.includes(k));
+  const all_ = req.query.loose === "1";
+  const results = searchVisible(id, req.user!.id, isDM, kinds, String(req.query.q ?? ""), Math.min(20, Number(req.query.limit) || 8));
+  // by default only entries that match every word; "loose" also returns partial matches (similar entries)
+  res.json(all_ ? results : results.filter((r) => r.match >= 1));
+});
+
 /** Anyone in the campaign can add details for something. The DM's go straight in; players' wait as drafts. */
 compendiumRoutes.post("/campaigns/:id/compendium/custom", (req, res) => {
   const { id, isDM } = campaignAccess(req);
@@ -123,7 +146,11 @@ compendiumRoutes.post("/campaigns/:id/compendium/ai-describe", async (req, res) 
   const name = String(req.body?.name ?? "").trim().slice(0, 120);
   if (!name) throw new HttpError(400, "Give it a name");
   const kind = req.body?.kind === "spell" ? "spell" : "item";
-  res.json(await describeThing(campaignContext(id), req.user!.id, kind, name, String(req.body?.hint ?? "").slice(0, 500)));
+  // Give the AI anything similar already in the Compendium (e.g. converted from a PDF) to work from
+  const { isDM } = campaignAccess(req);
+  const related = searchVisible(id, req.user!.id, isDM, [kind], name, 3).filter((r) => r.match >= 0.5)
+    .map((r) => `"${r.name}" (${r.source || "Compendium"}): ${JSON.stringify(r.data).slice(0, 2500)}`).join("\n\n");
+  res.json(await describeThing(campaignContext(id), req.user!.id, kind, name, String(req.body?.hint ?? "").slice(0, 500), related));
 });
 
 // ---- duplicates ----
