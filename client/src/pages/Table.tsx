@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Image as KImage, Rect, Circle, Group, Text, Line, Shape } from "react-konva";
 import type Konva from "konva";
 import { useStatus } from "../hooks";
+import { derive, normalizeCharacter } from "../../../shared/character";
 import { api } from "../api";
 import type { CampaignSocket, MapState, Token, FogShape } from "../socket";
 import type { Campaign } from "./Campaign";
@@ -128,6 +129,22 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
   const ownedChars = useOwnedCharacterIds(campaign.id, me);
   const canControl = (t: Token) => isDM || t.controlledBy === me || (t.characterId != null && ownedChars.has(t.characterId));
   const sel = map.tokens.find((t) => t.id === selected) ?? null;
+  const [menu, setMenu] = useState<{ sx: number; sy: number; p: { x: number; y: number }; tokenId?: number } | null>(null);
+  const [dropAt, setDropAt] = useState<{ x: number; y: number } | null>(null);
+  const partyChars = useApprovedCharacters(campaign.id);
+
+  function onContext(e: Konva.KonvaEventObject<PointerEvent>) {
+    e.evt.preventDefault();
+    const stagePos = e.target.getStage()!.getPointerPosition()!;
+    let node: Konva.Node | null = e.target;
+    let tokenId: number | undefined;
+    while (node) {
+      const m = node.name()?.match(/^token-(\d+)$/);
+      if (m) { tokenId = Number(m[1]); break; }
+      node = node.getParent();
+    }
+    setMenu({ sx: stagePos.x, sy: stagePos.y, p: snap(map, pointer().x, pointer().y), tokenId });
+  }
   const stageDraggable = tool === "select";
 
   return (
@@ -167,6 +184,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         onDragEnd={(e) => { if (e.target === e.target.getStage()) setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() })); }}
         onWheel={onWheel}
         onMouseDown={onDown}
+        onContextMenu={onContext}
         onMouseMove={onMove}
         onMouseUp={onUp}
         style={{ cursor: tool === "select" ? "grab" : "crosshair" }}
@@ -205,6 +223,20 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         </Layer>
       </Stage>
 
+      {menu && (
+        <ContextMenu menu={menu} map={map} isDM={isDM} me={me} live={live} chars={partyChars} ownedChars={ownedChars}
+          canControl={canControl}
+          close={() => setMenu(null)}
+          openToken={(id) => setSelected(id)}
+          openEncounter={(p) => setEncounterAt(p)}
+          openMonster={(p) => setDropAt(p)} />
+      )}
+      {dropAt && (
+        <div className="token-panel card">
+          <div className="row"><h3 className="grow" style={{ margin: 0 }}>Add monsters here</h3><button className="small" onClick={() => setDropAt(null)}>✕</button></div>
+          <MonsterDrop campaignId={campaign.id} at={dropAt} onDone={() => setDropAt(null)} />
+        </div>
+      )}
       {encounterAt !== undefined && (
         <div style={{ position: "absolute", inset: 0, zIndex: 20, background: "#000a", overflow: "auto", padding: 16 }} onMouseDown={(e) => e.target === e.currentTarget && setEncounterAt(undefined)}>
           <div style={{ maxWidth: 900, margin: "0 auto" }}>
@@ -249,10 +281,11 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
   const hpPct = t.hp != null && t.maxHp ? Math.max(0, Math.min(1, t.hp / t.maxHp)) : null;
   return (
     <Group
+      name={`token-${t.id}`}
       x={t.x}
       y={t.y}
       draggable={draggable}
-      onMouseDown={(e) => { e.cancelBubble = true; onSelect(); }}
+      onMouseDown={(e) => { if (e.evt.button === 2) return; e.cancelBubble = true; onSelect(); }}
       onTap={onSelect}
       onDragEnd={(e) => {
         const s = snap(map, e.target.x(), e.target.y(), t.size);
@@ -422,6 +455,91 @@ function DamageBox({ t, save }: { t: Token; save: (p: Partial<Token>) => void })
       <button className="small danger" disabled={!n} onClick={() => apply(-1)}>💥 Damage</button>
       <button className="small" disabled={!n} onClick={() => apply(1)}>💚 Heal</button>
       {t.hp != null && t.hp <= 0 && <span className="pill bad">down</span>}
+    </div>
+  );
+}
+
+function useApprovedCharacters(campaignId: number) {
+  const [chars, setChars] = useState<any[]>([]);
+  useEffect(() => {
+    api.get<any[]>(`/characters?campaignId=${campaignId}`).then((cs) => setChars(cs.filter((c) => c.status === "approved"))).catch(() => {});
+  }, [campaignId]);
+  return chars;
+}
+
+/** Right-click menu: add characters, monsters and encounters where you clicked; quick token actions. */
+function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl, close, openToken, openEncounter, openMonster }: {
+  menu: { sx: number; sy: number; p: { x: number; y: number }; tokenId?: number }; map: MapState; isDM: boolean; me: number; live: CampaignSocket;
+  chars: any[]; ownedChars: Set<number>; canControl: (t: Token) => boolean; close: () => void;
+  openToken: (id: number) => void; openEncounter: (p: { x: number; y: number }) => void; openMonster: (p: { x: number; y: number }) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [sub, setSub] = useState<string | null>(null);
+  useEffect(() => {
+    const off = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close();
+    setTimeout(() => document.addEventListener("mousedown", off), 0);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc); };
+  }, [close]);
+
+  const t = menu.tokenId ? map.tokens.find((x) => x.id === menu.tokenId) : undefined;
+  const placeable = chars.filter((c) => isDM || ownedChars.has(c.id));
+  const onMap = new Set(map.tokens.map((x) => x.characterId).filter(Boolean));
+  const item = (label: string, action: () => void, opts: { danger?: boolean; hint?: string } = {}) => (
+    <div className="ctx-item" style={opts.danger ? { color: "#ff9b85" } : undefined} onClick={() => { action(); close(); }} title={opts.hint}>{label}</div>
+  );
+  const placeChar = (c: any) => live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: c.data.hp.max ?? undefined, ...menu.p });
+  const ring = (label: string, feet: number, kind: "ring" | "sight", color: string) => {
+    if (!t) return;
+    const has = (t.rings ?? []).some((r) => r.label === label && r.kind === kind);
+    live.socket?.emit("token:update", { id: t.id, rings: has ? t.rings.filter((r) => !(r.label === label && r.kind === kind)) : [...(t.rings ?? []), { label, feet, color, kind }] });
+  };
+  const speed = t?.meta?.speed ?? (t?.characterId ? chars.find((c) => c.id === t.characterId)?.data?.speed : undefined) ?? 30;
+  const sight = Math.max(60, ...(t?.meta?.vision ?? []).map((v) => v.feet));
+
+  // keep the menu on screen
+  const left = Math.max(4, Math.min(menu.sx, (ref.current?.parentElement?.clientWidth ?? 9999) - 230));
+  const top = Math.max(4, Math.min(menu.sy, (ref.current?.parentElement?.clientHeight ?? 9999) - 320));
+  return (
+    <div ref={ref} className="ctx-menu" style={{ left, top }} onContextMenu={(e) => e.preventDefault()}>
+      {t ? (
+        <>
+          <div className="ctx-title">{t.name}{t.hp != null ? ` · ${t.hp}${t.maxHp ? `/${t.maxHp}` : ""} HP` : ""}</div>
+          {canControl(t) && item("💥 Damage / heal / details…", () => openToken(t.id))}
+          {canControl(t) && item(`${(t.rings ?? []).some((r) => r.label === "Move") ? "✓" : "◯"} Movement ring (${speed} ft)`, () => ring("Move", speed, "ring", "#5cb85c"))}
+          {canControl(t) && item(`${(t.rings ?? []).some((r) => r.label === "Dash") ? "✓" : "◯"} Dash ring (${speed * 2} ft)`, () => ring("Dash", speed * 2, "ring", "#9bd38f"))}
+          {canControl(t) && item(`${(t.rings ?? []).some((r) => r.kind === "sight") ? "✓" : "◯"} Line of sight (${sight} ft)`, () => ring("Line of sight", sight, "sight", "#5b9cf0"))}
+          {canControl(t) && item("◎ More rings (reach, ranges, spells)…", () => openToken(t.id))}
+          {canControl(t) && (t.rings ?? []).length > 0 && item("Clear rings", () => live.socket?.emit("token:update", { id: t.id, rings: [] }))}
+          {item("📍 Ping here", () => live.socket?.emit("ping", menu.p))}
+          {(isDM || canControl(t)) && item("🎲 Roll initiative", () => {
+            const c = t.characterId ? chars.find((x) => x.id === t.characterId) : null;
+            const bonus = c ? derive(normalizeCharacter(c.data)).initiative : 0;
+            live.socket?.emit("initiative", { op: "roll", name: t.name, bonus, hidden: t.hidden, tokenId: t.id });
+          })}
+          {isDM && item(t.hidden ? "👁 Show to players" : "🙈 Hide from players", () => live.socket?.emit("token:update", { id: t.id, hidden: !t.hidden }))}
+          {(isDM || canControl(t)) && item("🗑 Remove from map", () => live.socket?.emit("token:delete", t.id), { danger: true })}
+        </>
+      ) : (
+        <>
+          <div className="ctx-title">Here</div>
+          {placeable.length > 0 && (
+            <div className="ctx-item" onMouseEnter={() => setSub("chars")} onClick={() => setSub(sub === "chars" ? null : "chars")}>🧝 {isDM ? "Add a player character" : "Place my character"} ▸</div>
+          )}
+          {sub === "chars" && placeable.map((c) => (
+            <div key={c.id} className="ctx-item ctx-sub" onClick={() => { placeChar(c); close(); }}>
+              {c.name} {onMap.has(c.id) && <span className="muted" style={{ fontSize: 11 }}>(already on map)</span>}
+            </div>
+          ))}
+          {isDM && item("👹 Add monsters here…", () => openMonster(menu.p))}
+          {isDM && item("⚔️ Build an encounter here…", () => openEncounter(menu.p))}
+          {item("📍 Ping here", () => live.socket?.emit("ping", menu.p))}
+          {isDM && map.fogEnabled && item("☀️ Reveal fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "reveal", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
+          {isDM && map.fogEnabled && item("🌑 Cover with fog around here", () => live.socket?.emit("fog", { op: "add", shape: { mode: "hide", kind: "circle", x: menu.p.x, y: menu.p.y, r: map.gridSize * 3 } }))}
+          {!isDM && placeable.length === 0 && <div className="ctx-item muted" style={{ cursor: "default" }}>You need an approved character to place a token.</div>}
+        </>
+      )}
     </div>
   );
 }

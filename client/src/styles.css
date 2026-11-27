@@ -168,3 +168,10 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .side { border-left: 0; border-top: 1px solid var(--line); }
   .sheet { grid-template-columns: 1fr; }
 }
+
+/* right-click menu on the map */
+.ctx-menu { position: absolute; z-index: 30; min-width: 220px; background: #17130f; border: 1px solid var(--gold); border-radius: 8px; padding: 4px 0; box-shadow: 0 10px 30px #000c; }
+.ctx-title { padding: 4px 12px 6px; font-weight: 600; color: var(--gold); border-bottom: 1px solid var(--line); margin-bottom: 4px; font-size: 13px; }
+.ctx-item { padding: 6px 12px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.ctx-item:hover { background: var(--panel-2); }
+.ctx-sub { padding-left: 28px; }
