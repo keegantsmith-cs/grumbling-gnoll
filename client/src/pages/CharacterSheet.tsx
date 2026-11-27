@@ -9,6 +9,7 @@ import { ALIGNMENTS, EXTRA_CLASSES, backgroundsFor, speciesFor, subclassesFor } 
 import { StatusPill } from "./Home";
 import { FullBody, Portrait } from "../components/Portrait";
 import { Markdown } from "../components/Markdown";
+import { SrdInfo, SrdInput, spellSummary, type SrdEntry } from "../components/SrdLookup";
 
 type Roll = (expr: string, label: string) => void;
 
@@ -172,9 +173,9 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
           {/* Attacks, spells, gear, story */}
           <div>
             <FullBody url={d.fullBodyUrl} canEdit={canEdit} characterId={id} name={d.name} onChange={(fullBodyUrl) => play({ fullBodyUrl }, { fullBodyUrl })} />
-            <AttacksEditor d={d} upd={upd} roll={r} />
+            <AttacksEditor d={d} dv={dv} upd={upd} roll={r} />
             <SpellsEditor d={d} dv={dv} upd={upd} play={play} />
-            <InventoryEditor d={d} upd={upd} />
+            <InventoryEditor d={d} dv={dv} upd={upd} />
             <div className="card">
               <h3>Features & traits</h3>
               <textarea rows={6} value={d.features} onChange={(e) => upd({ features: e.target.value })} placeholder="Class features, racial traits, feats..." />
@@ -294,22 +295,40 @@ function ClassesEditor({ classes, rules, onChange }: { classes: ClassLevel[]; ru
   );
 }
 
-function AttacksEditor({ d, upd, roll }: { d: CharacterData; upd: (p: Partial<CharacterData>) => void; roll: Roll }) {
+function AttacksEditor({ d, dv, upd, roll }: { d: CharacterData; dv: ReturnType<typeof derive>; upd: (p: Partial<CharacterData>) => void; roll: Roll }) {
   const set = (i: number, k: string, v: string) => upd({ attacks: d.attacks.map((a, j) => (j === i ? { ...a, [k]: v } : a)) });
+  // Fill in bonus and damage from an SRD weapon or spell, using this character's numbers
+  const fromSrd = (i: number, e: SrdEntry) => {
+    let bonus = "", damage = "", notes = "";
+    if (e.type === "equipment") {
+      const ability = e.ranged ? dv.mods.dex : e.finesse ? Math.max(dv.mods.str, dv.mods.dex) : dv.mods.str;
+      bonus = fmtMod(ability + dv.proficiencyBonus);
+      const [dice, ...type] = String(e.damage).split(" ");
+      damage = dice ? `${dice}${ability ? fmtMod(ability) : ""} ${type.join(" ")}`.trim() : "";
+      notes = [e.range, (e.properties ?? []).join(", ")].filter(Boolean).join(" · ");
+    } else if (e.type === "spell") {
+      if (e.attack) bonus = fmtMod(dv.spellAttack ?? dv.proficiencyBonus);
+      damage = e.damage ? `${e.damage} ${String(e.damageType).toLowerCase()}` : "";
+      notes = e.save ? `DC ${dv.spellSaveDC ?? "?"} ${e.save} save` : spellSummary(e);
+    }
+    upd({ attacks: d.attacks.map((a, j) => (j === i ? { ...a, name: e.name, bonus, damage, notes } : a)) });
+  };
   return (
     <div className="card">
       <h3>Attacks</h3>
       {d.attacks.map((a, i) => (
         <div key={i} className="row" style={{ marginBottom: 4 }}>
-          <input className="grow" value={a.name} placeholder="Longsword" onChange={(e) => set(i, "name", e.target.value)} />
+          <SrdInput className="grow" value={a.name} placeholder="Longsword, Fire Bolt..." types={["equipment", "spell"]} onChange={(v) => set(i, "name", v)} onPick={(e) => fromSrd(i, e)} />
           <input value={a.bonus} placeholder="+5" style={{ width: 54 }} onChange={(e) => set(i, "bonus", e.target.value)} />
           <input value={a.damage} placeholder="1d8+3 slashing" style={{ width: 130 }} onChange={(e) => set(i, "damage", e.target.value)} />
           <button type="button" className="small" onClick={() => roll(`1d20${a.bonus && !a.bonus.startsWith("-") && !a.bonus.startsWith("+") ? "+" : ""}${a.bonus || "+0"}`, `${d.name}: ${a.name} attack`)}>🎲</button>
           <button type="button" className="small" onClick={() => roll(a.damage.split(" ")[0] || "1d4", `${d.name}: ${a.name} damage`)}>💥</button>
           <button type="button" className="small danger" onClick={() => upd({ attacks: d.attacks.filter((_, j) => j !== i) })}>✕</button>
+          {a.notes && <div className="muted" style={{ width: "100%", fontSize: 11, marginTop: -2 }}>{a.notes}</div>}
         </div>
       ))}
       <button type="button" className="small" onClick={() => upd({ attacks: [...d.attacks, { name: "", bonus: "", damage: "", notes: "" }] })}>+ Attack</button>
+      <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>Start typing a weapon or spell to fill in the numbers.</span>
     </div>
   );
 }
@@ -347,7 +366,8 @@ function SpellsEditor({ d, dv, upd, play }: { d: CharacterData; dv: ReturnType<t
           <select value={s.level} onChange={(e) => setSpell(i, { level: Number(e.target.value) })} style={{ width: 70 }}>
             {Array.from({ length: 10 }, (_, l) => <option key={l} value={l}>{l === 0 ? "Cantrip" : `Lvl ${l}`}</option>)}
           </select>
-          <input className="grow" value={s.name} placeholder="Spell name" onChange={(e) => setSpell(i, { name: e.target.value })} />
+          <SrdInput className="grow" value={s.name} placeholder="Spell name" types={["spell"]} onChange={(v) => setSpell(i, { name: v })} onPick={(e) => setSpell(i, { name: e.name, level: e.level, notes: spellSummary(e) })} />
+          <SrdInfo type="spell" name={s.name} />
           <button type="button" className="small danger" onClick={() => upd({ spells: d.spells.filter((_, j) => j !== i) })}>✕</button>
         </div>
       ))}
@@ -356,7 +376,22 @@ function SpellsEditor({ d, dv, upd, play }: { d: CharacterData; dv: ReturnType<t
   );
 }
 
-function InventoryEditor({ d, upd }: { d: CharacterData; upd: (p: Partial<CharacterData>) => void }) {
+function InventoryEditor({ d, dv, upd }: { d: CharacterData; dv: ReturnType<typeof derive>; upd: (p: Partial<CharacterData>) => void }) {
+  const { toast } = useStatus();
+  const pickItem = (i: number, e: SrdEntry) => {
+    const item = { ...d.inventory[i], name: e.name, weight: Number(e.weight) || 0, notes: e.type === "magic" ? `${e.rarity}${e.attunement ? ", requires attunement" : ""}` : [e.damage, e.properties?.join(", ")].filter(Boolean).join(" · ") };
+    const inventory = d.inventory.map((it, j) => (j === i ? item : it));
+    // Body armor: offer the right AC (shields add +2)
+    if (e.type === "equipment" && e.ac && e.name !== "Shield") {
+      const dex = e.ac.dex ? (e.ac.max ? Math.min(e.ac.max, dv.mods.dex) : dv.mods.dex) : 0;
+      const shield = d.inventory.some((x) => x.name.toLowerCase() === "shield" && x.equipped) ? 2 : 0;
+      const ac = e.ac.base + dex + shield;
+      upd({ inventory: inventory.map((it, j) => (j === i ? { ...it, equipped: true } : it)), ac });
+      toast(`Armor class set to ${ac} (${e.name}${dex ? ` + Dex ${fmtMod(dex)}` : ""}${shield ? " + shield" : ""}). Change it if you have other bonuses.`);
+      return;
+    }
+    upd({ inventory });
+  };
   const set = (i: number, patch: object) => upd({ inventory: d.inventory.map((it, j) => (j === i ? { ...it, ...patch } : it)) });
   const attuned = d.inventory.filter((i) => i.attuned).length;
   return (
@@ -370,7 +405,8 @@ function InventoryEditor({ d, upd }: { d: CharacterData; upd: (p: Partial<Charac
       {d.inventory.map((it, i) => (
         <div key={i} className="row" style={{ marginBottom: 4 }}>
           <input type="number" value={it.qty} style={{ width: 52 }} onChange={(e) => set(i, { qty: Number(e.target.value) })} />
-          <input className="grow" value={it.name} placeholder="Item" onChange={(e) => set(i, { name: e.target.value })} />
+          <SrdInput className="grow" value={it.name} placeholder="Item" types={["equipment", "magic"]} onChange={(v) => set(i, { name: v })} onPick={(e) => pickItem(i, e)} />
+          <SrdInfo type="equipment" name={it.name} />
           <label className="inline" title="Equipped"><input type="checkbox" checked={it.equipped} onChange={(e) => set(i, { equipped: e.target.checked })} />E</label>
           <label className="inline" title="Attuned"><input type="checkbox" checked={it.attuned} onChange={(e) => set(i, { attuned: e.target.checked })} />A</label>
           <button type="button" className="small danger" onClick={() => upd({ inventory: d.inventory.filter((_, j) => j !== i) })}>✕</button>

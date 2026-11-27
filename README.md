@@ -92,4 +92,4 @@ Then open <http://localhost:5173>. `npm run typecheck` checks the code. `npm run
 
 ## Content and copyright
 
-The app ships with no copyrighted D&D text. The class list and math follow the free 5e System Reference Document. Your group adds anything else (subclasses, monsters, books you own) privately. Only upload PDFs you own, for your own table.
+The app includes the free 5e System Reference Document 5.1 (spells, equipment, magic items, monsters) under the Creative Commons Attribution 4.0 license; see `srd/NOTICE.md`. It ships no other D&D text. The class list and math follow the free 5e System Reference Document. Your group adds anything else (subclasses, monsters, books you own) privately. Only upload PDFs you own, for your own table.
