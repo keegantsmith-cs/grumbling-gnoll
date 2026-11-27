@@ -28,7 +28,7 @@ A private D&D 5e virtual tabletop for one DM (the owner, non-technical) and ~10 
 - Browser checks: Playwright is preinstalled (`require('playwright')`); start the server with `DATA_DIR=<scratch dir> PORT=<port> npx tsx server/index.ts`.
 
 ## Helpers
-- `.claude/agents/website-designer.md`: a UI/UX designer agent. Ask for it by name ("use the website-designer agent to review the character sheet").
+- Agents in `.claude/agents/` (ask for them by name): `website-designer` (UI/UX polish), `playtester` (simulated game night in a browser, fixes bugs), `privacy-guard` (DM-only data never leaks; security; tests), `rules-lawyer` (5e math and rules data; tests).
 - `docs-next-session.md`: starter message for new sessions.
 
 ## Conventions

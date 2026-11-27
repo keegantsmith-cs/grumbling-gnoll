@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Router } from "express";
 import { all, one, run } from "../db.ts";
 import { COOKIE, createSession, hashPassword, newInviteCode, requireAdmin, requireUser, setSessionCookie, verifyPassword } from "../auth.ts";
@@ -37,13 +38,16 @@ authRoutes.post("/register", (req, res) => {
   res.json({ ok: true });
 });
 
+const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString("hex"));
+
 authRoutes.post("/login", (req, res) => {
   const { username, password } = req.body ?? {};
   const ipKey = `login-ip:${req.ip}`, userKey = `login-user:${String(username ?? "").toLowerCase()}`;
   checkLimit(ipKey, 20, 15 * 60e3);
   checkLimit(userKey, 8, 15 * 60e3);
   const u = one("SELECT * FROM users WHERE username = ?", String(username ?? ""));
-  if (!u || !verifyPassword(String(password ?? ""), u.pass_hash)) {
+  // Check a dummy password for unknown names too, so the answer takes the same time either way
+  if (!verifyPassword(String(password ?? ""), u?.pass_hash ?? DUMMY_HASH) || !u) {
     hit(ipKey);
     hit(userKey);
     throw new HttpError(401, "Wrong username or password");
@@ -67,6 +71,8 @@ authRoutes.post("/me/password", requireUser, (req, res) => {
   if (!verifyPassword(String(current ?? ""), u.pass_hash)) { hit(`pw:${u.id}`); throw new HttpError(400, "Current password is wrong"); }
   if (typeof next !== "string" || next.length < 8) throw new HttpError(400, "New password must be at least 8 characters");
   run("UPDATE users SET pass_hash = ? WHERE id = ?", hashPassword(next), u.id);
+  // Log out everywhere else (e.g. a lost phone), but stay logged in here
+  run("DELETE FROM sessions WHERE user_id = ? AND token != ?", u.id, String(req.cookies?.[COOKIE] ?? ""));
   res.json({ ok: true });
 });
 

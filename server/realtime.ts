@@ -110,7 +110,7 @@ export function broadcastInitiative(campaignId: number) {
 /** Players see hidden monsters in the turn order as "???" so they can't count them in advance. */
 function initiativeFor(state: { round: number; turn: number; entries: Row[] }, isDM: boolean) {
   if (isDM) return state;
-  return { ...state, entries: state.entries.map((e) => (e.hidden ? { ...e, name: "???", init: null } : e)) };
+  return { ...state, entries: state.entries.map((e) => (e.hidden ? { id: e.id, name: "???", init: null, hidden: true } : e)) };
 }
 
 export function postChat(campaignId: number, userId: number | null, kind: string, body: unknown, whisperTo: number | null = null) {
@@ -127,6 +127,18 @@ export function postChat(campaignId: number, userId: number | null, kind: string
     if (canSee(msg, d.user.id, !!d.isDM)) s.emit("chat", msg);
   });
   return msg;
+}
+
+/** Someone was removed from a campaign: stop sending them its live table and chat. */
+export function dropFromCampaign(campaignId: number, userId: number) {
+  if (!io) return;
+  eachSocket(campaignId, (s, d) => {
+    if (d.user.id !== userId) return;
+    s.leave(room(campaignId));
+    d.campaignId = undefined;
+    d.isDM = false;
+  });
+  io.to(room(campaignId)).emit("presence", presence(campaignId));
 }
 
 /** Tell everyone in the campaign to reload a list (characters, approvals, compendium...). */

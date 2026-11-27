@@ -16,12 +16,12 @@ How I'd like you to work:
 - Commit and push to main when a feature is done, then tell me to run the update script.
 - Tell me honestly what you tested and what still needs my real API key to try.
 
-What I want in this session:
-[Write your requests here, all at once if you can. Examples:
-- Use the website-designer agent to review and clean up the UI/UX of the whole site, starting with the Table screen and the character sheet.
-- Fog that clears automatically where players' tokens can see.
-- Condition icons on tokens (prone, poisoned, concentrating) with a hover explanation.
-- Level-up helper for players.]
+What I want in this session (please do them in this order, using the agents in .claude/agents/):
+1. privacy-guard: check that no DM-only information can reach players and that logins, uploads and permissions are safe. Fix any leaks and add a test for each rule.
+2. playtester: run a full simulated game night in a browser (DM + 3 players) and fix the bugs it finds.
+3. website-designer: review and clean up the UI/UX, starting with the Table screen and the character sheet. Show me before/after screenshots.
+4. rules-lawyer: check the 5e math (2014 and 2024) and add tests; list anything I need to decide.
+After each step, give me a short plain-language summary of what changed. Commit and push after each step.
 ```
 
 ## Tips to keep sessions cheap
