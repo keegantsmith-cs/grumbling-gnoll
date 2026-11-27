@@ -309,7 +309,8 @@ export function initRealtime(server: HttpServer) {
       if (!owner) return;
       // Players can change HP/conditions on their own tokens; everything else is DM-only.
       const fields: Record<string, unknown> = {};
-      if (p.hp !== undefined) fields.hp = p.hp === null || p.hp === "" ? null : Number(p.hp);
+      // Hit points never go below 0 (5e): extra damage doesn't stack up as negative HP
+      if (p.hp !== undefined) fields.hp = p.hp === null || p.hp === "" ? null : Math.max(0, Math.round(Number(p.hp)) || 0);
       if (p.conditions !== undefined) fields.conditions = String(p.conditions).slice(0, 200);
       // Range rings (movement, reach, spell ranges, sight...) can be set by whoever controls the token
       if (Array.isArray(p.rings)) {
@@ -331,6 +332,16 @@ export function initRealtime(server: HttpServer) {
       const keys = Object.keys(fields);
       if (!keys.length) return;
       run(`UPDATE tokens SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, ...keys.map((k) => fields[k]), t.id);
+      // Showing or hiding a token does the same to its place in the turn order
+      if (fields.hidden !== undefined && fields.hidden !== t.hidden) {
+        const c = one("SELECT initiative FROM campaigns WHERE id = ?", d.campaignId)!;
+        const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
+        if (state.entries.some((e) => e.tokenId === t.id)) {
+          state.entries = state.entries.map((e) => (e.tokenId === t.id ? { ...e, hidden: !!fields.hidden } : e));
+          run("UPDATE campaigns SET initiative = ? WHERE id = ?", JSON.stringify(state), d.campaignId);
+          broadcastInitiative(d.campaignId);
+        }
+      }
       // A player character's token and sheet share the same current HP
       if (t.character_id && fields.hp != null) {
         const ch = one("SELECT data FROM characters WHERE id = ?", t.character_id);

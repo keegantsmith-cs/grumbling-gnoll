@@ -213,6 +213,16 @@ characterRoutes.put("/characters/:id", (req, res) => {
   const { c, isDM } = loadCharacter(num(req.params.id), uid, true);
   const data = cleanData(req.body?.data, rulesOf(c.campaign_id));
   if (isDM || !c.campaign_id) {
+    // The DM tweaking a sheet that's waiting for approval edits the waiting version, so "Approve" keeps the DM's changes.
+    const pending = isDM ? one("SELECT id FROM character_changes WHERE character_id = ? AND status = 'pending'", c.id) : undefined;
+    if (pending) {
+      run("UPDATE character_changes SET proposed = ? WHERE id = ?", JSON.stringify(data), pending.id);
+      // An approved character keeps its official version until the DM approves the change.
+      if (c.status !== "approved") run("UPDATE characters SET data = ?, name = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, c.id);
+      notify(c.campaign_id, "approvals");
+      notify(c.campaign_id, "characters");
+      return res.json({ applied: true, pending: true });
+    }
     run("UPDATE characters SET data = ?, name = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), data.name, c.id);
     if (c.campaign_id) notify(c.campaign_id, "characters");
     return res.json({ applied: true });
@@ -232,7 +242,7 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
   const data = normalizeCharacter(parseJSON(c.data, {}), rulesOf(c.campaign_id));
   const b = req.body ?? {};
   if (b.hp) {
-    if (b.hp.current !== undefined) data.hp.current = Number(b.hp.current) || 0;
+    if (b.hp.current !== undefined) data.hp.current = Math.max(0, Math.round(Number(b.hp.current)) || 0);
     if (b.hp.temp !== undefined) data.hp.temp = Math.max(0, Number(b.hp.temp) || 0);
   }
   if (b.deathSaves) data.deathSaves = { successes: Math.min(3, Number(b.deathSaves.successes) || 0), failures: Math.min(3, Number(b.deathSaves.failures) || 0) };

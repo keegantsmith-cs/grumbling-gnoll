@@ -50,7 +50,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
   async function save() {
     try {
       const res = await api.put(`/characters/${id}`, { data: d, note });
-      setMsg(res.applied ? "Saved." : "Sent to the DM for approval. You'll see it here once they review it.");
+      setMsg(res.pending ? "Saved into the version waiting for approval. Approve it in the Approvals tab to make it official." : res.applied ? "Saved." : "Sent to the DM for approval. You'll see it here once they review it.");
       setNote("");
       reload();
     } catch (e) {

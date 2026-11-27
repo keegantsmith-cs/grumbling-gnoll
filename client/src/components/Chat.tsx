@@ -63,7 +63,7 @@ function Message({ m }: { m: ChatMsg }) {
   const time = new Date(m.createdAt.replace(" ", "T") + "Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const header = (
     <div className="who">
-      {m.name} {whisper && <span className="muted">{m.whisperTo === m.userId ? "🔒 hidden from players" : m.userId === status.user?.id ? `→ ${m.body.toName ?? "DM"} (private)` : "(private)"}</span>} <span className="muted" style={{ float: "right", fontWeight: 400 }}>{time}</span>
+      {m.name} {whisper && <span className="muted">{m.whisperTo === m.userId ? "🔒 hidden from players" : m.userId === status.user?.id || (m.body.toName && m.whisperTo !== status.user?.id) ? `→ ${m.body.toName ?? "DM"} (private)` : "(private)"}</span>} <span className="muted" style={{ float: "right", fontWeight: 400 }}>{time}</span>
     </div>
   );
   if (m.kind === "roll") {

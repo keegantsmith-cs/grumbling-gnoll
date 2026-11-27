@@ -125,7 +125,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
     setView({ scale, x: p.x - mx * scale, y: p.y - my * scale });
   }
 
-  function onDown(e: Konva.KonvaEventObject<MouseEvent>) {
+  function onDown(e: Konva.KonvaEventObject<PointerEvent>) {
     const p = pointer();
     if (e.evt.button === 2) return;
     if (tool === "measure") setMeasure({ a: snap(map, p.x, p.y), b: snap(map, p.x, p.y) });
@@ -219,10 +219,10 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
         draggable={stageDraggable}
         onDragEnd={(e) => { if (e.target === e.target.getStage()) setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() })); }}
         onWheel={onWheel}
-        onMouseDown={onDown}
+        onPointerDown={onDown}
         onContextMenu={onContext}
-        onMouseMove={onMove}
-        onMouseUp={onUp}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
         style={{ cursor: tool === "select" ? "grab" : "crosshair" }}
       >
         <Layer ref={layerRef} listening>
@@ -330,7 +330,7 @@ function TokenNode({ t, map, draggable, selected, onSelect, onMove }: { t: Token
       x={t.x}
       y={t.y}
       draggable={draggable}
-      onMouseDown={(e) => { if (e.evt.button === 2) return; e.cancelBubble = true; onSelect(); }}
+      onPointerDown={(e) => { if (e.evt.button === 2) return; e.cancelBubble = true; onSelect(); }}
       onTap={onSelect}
       onDragEnd={(e) => {
         const s = snap(map, e.target.x(), e.target.y(), t.size);
@@ -432,7 +432,7 @@ function AddToken({ map, view, size, isDM, campaign, live, close }: { map: MapSt
   const center = snap(map, (size.w / 2 - view.x) / view.scale, (size.h / 2 - view.y) / view.scale);
 
   function placeCharacter(c: any) {
-    live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: c.data.hp.max ?? undefined, ...center });
+    live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: derive(normalizeCharacter(c.data)).maxHp, ...center });
     close();
   }
 
@@ -540,7 +540,7 @@ function ContextMenu({ menu, map, isDM, me, live, chars, ownedChars, canControl,
   const item = (label: string, action: () => void, opts: { danger?: boolean; hint?: string } = {}) => (
     <div className="ctx-item" style={opts.danger ? { color: "#ff9b85" } : undefined} onClick={() => { action(); close(); }} title={opts.hint}>{label}</div>
   );
-  const placeChar = (c: any) => live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: c.data.hp.max ?? undefined, ...menu.p });
+  const placeChar = (c: any) => live.socket?.emit("token:add", { name: c.name, color: "#2e6b8a", size: 1, characterId: c.id, imageUrl: c.data.portraitUrl || "", hp: c.data.hp.current, maxHp: derive(normalizeCharacter(c.data)).maxHp, ...menu.p });
   const ring = (label: string, feet: number, kind: "ring" | "sight", color: string) => {
     if (!t) return;
     const has = (t.rings ?? []).some((r) => r.label === label && r.kind === kind);

@@ -451,3 +451,48 @@ test("uploads: only real image types, saved with a safe name, served so browsers
   assert.equal((await send(`/campaigns/${campaignId}/adventures`, "pdf", "a.pdf", "application/pdf", eve)).status, 404);
   assert.equal(fs.readdirSync(path.join(dataDir, "uploads")).length, before + 1);
 });
+
+// Bugs found in the simulated game night
+// ---------------------------------------------------------------------------
+test("the DM's tweaks to a sheet waiting for approval are kept when they approve it", async () => {
+  // A new character: the DM fixes the race on the sheet, then approves
+  const id = (await sam.post("/characters", { campaignId, data: { name: "Pip", species: "" } })).data.id;
+  const sheet = (await dm.get(`/characters/${id}`)).data;
+  const saved = await dm.put(`/characters/${id}`, { data: { ...sheet.pending.data, species: "Lightfoot Halfling", speed: 25 } });
+  assert.equal(saved.data.pending, true);
+  const change = (await dm.get(`/campaigns/${campaignId}/approvals`)).data.find((a: any) => a.characterId === id);
+  assert.equal((await dm.post(`/changes/${change.id}/approve`, {})).status, 200);
+  const after = (await sam.get(`/characters/${id}`)).data;
+  assert.equal(after.status, "approved");
+  assert.equal(after.data.species, "Lightfoot Halfling");
+  assert.equal(after.data.speed, 25);
+  // An approved character's official sheet doesn't change until the DM approves the player's edit
+  await sam.put(`/characters/${id}`, { data: { ...after.data, features: "Lucky" }, note: "added Lucky" });
+  await dm.put(`/characters/${id}`, { data: { ...after.data, features: "Lucky (halfling)" } });
+  assert.equal((await jo.get(`/characters/${id}`)).data.data.features, after.data.features);
+  const edit = (await dm.get(`/campaigns/${campaignId}/approvals`)).data.find((a: any) => a.characterId === id);
+  await dm.post(`/changes/${edit.id}/approve`, {});
+  assert.equal((await jo.get(`/characters/${id}`)).data.data.features, "Lucky (halfling)");
+});
+
+test("hit points never go below 0, on the sheet or on the map", async () => {
+  await sam.patch(`/characters/${charId}/play`, { hp: { current: -7 } });
+  assert.equal((await sam.get(`/characters/${charId}`)).data.data.hp.current, 0);
+  const D = await live(dm);
+  D.s.emit("token:update", { id: hiddenTokenId, hp: -13 });
+  await waitFor(() => D.last("map")?.tokens.find((t: any) => t.id === hiddenTokenId)?.hp === 0);
+  D.s.close();
+});
+
+test("showing a hidden monster on the map shows it in the turn order too (and hiding hides it)", async () => {
+  const D = await live(dm), S = await live(sam);
+  D.s.emit("initiative", { op: "add", name: "Lurking Ghoul", init: 15, hidden: true, tokenId: hiddenTokenId });
+  await waitFor(() => (S.last("initiative")?.entries.length ?? 0) === 1);
+  assert.equal(S.last("initiative").entries[0].name, "???");
+  D.s.emit("token:update", { id: hiddenTokenId, hidden: false });
+  await waitFor(() => S.last("initiative").entries[0].name === "Lurking Ghoul");
+  D.s.emit("token:update", { id: hiddenTokenId, hidden: true });
+  await waitFor(() => S.last("initiative").entries[0].name === "???");
+  D.s.emit("initiative", { op: "clear" });
+  for (const x of [D, S]) x.s.close();
+});
