@@ -24,7 +24,7 @@ export function ChatPanel({ campaign, live }: { campaign: Campaign; live: Campai
     live.socket?.emit("chat", text);
     setText("");
   }
-  const roll = (expr: string, label = "") => live.socket?.emit("roll", { expr, label, secret });
+  const roll = (expr: string, label = "") => live.socket?.emit("roll", campaign.isDM ? { expr, label, public: secret } : { expr, label, secret });
 
   return (
     <>
@@ -38,12 +38,18 @@ export function ChatPanel({ campaign, live }: { campaign: Campaign; live: Campai
         <button onClick={() => roll("2d20kl1", "disadvantage")} title="Roll with disadvantage">dis</button>
         <button title={anim ? "Turn off dice animation" : "Turn on dice animation"} style={{ marginLeft: "auto", opacity: anim ? 1 : 0.5 }} onClick={() => { diceSettings.animation = !anim; setAnim(!anim); }}>✨</button>
         <button title={sound ? "Mute dice sound" : "Turn on dice sound"} style={{ opacity: anim && sound ? 1 : 0.5 }} onClick={() => { diceSettings.sound = !sound; setSound(!sound); }}>{sound ? "🔊" : "🔇"}</button>
-        <label className="inline" style={{ fontSize: 12 }} title={campaign.isDM ? "Only you see the roll" : "Only you and the DM see the roll"}>
-          <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /> secret
-        </label>
+        {campaign.isDM ? (
+          <label className="inline" style={{ fontSize: 12 }} title="Your rolls are hidden from players unless you tick this">
+            <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /> show players
+          </label>
+        ) : (
+          <label className="inline" style={{ fontSize: 12 }} title="Only you and the DM see the roll">
+            <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} /> secret
+          </label>
+        )}
       </div>
       <form className="chat-input" onSubmit={send}>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Message, /r 2d6+3 sword, /w name hi" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={campaign.isDM ? "Message, /r 1d20 (hidden), /pr 1d20 (shown), /w name hi" : "Message, /r 2d6+3 sword, /w name hi"} />
         <button className="primary">Send</button>
       </form>
     </>
@@ -57,7 +63,7 @@ function Message({ m }: { m: ChatMsg }) {
   const time = new Date(m.createdAt.replace(" ", "T") + "Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const header = (
     <div className="who">
-      {m.name} {whisper && <span className="muted">{m.userId === status.user?.id ? `→ ${m.body.toName ?? "DM"} (private)` : "(private)"}</span>} <span className="muted" style={{ float: "right", fontWeight: 400 }}>{time}</span>
+      {m.name} {whisper && <span className="muted">{m.whisperTo === m.userId ? "🔒 hidden from players" : m.userId === status.user?.id ? `→ ${m.body.toName ?? "DM"} (private)` : "(private)"}</span>} <span className="muted" style={{ float: "right", fontWeight: 400 }}>{time}</span>
     </div>
   );
   if (m.kind === "roll") {

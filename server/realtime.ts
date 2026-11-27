@@ -221,20 +221,23 @@ export function initRealtime(server: HttpServer) {
       if (!t) return;
       const cid = d.campaignId;
       let m: RegExpMatchArray | null;
-      if ((m = t.match(/^\/(?:r|roll)\s+(\S+)\s*(.*)$/i))) return doRoll(cid, d.user.id, m[1], m[2], null, socket);
+      if ((m = t.match(/^\/(?:pr|publicroll)\s+(\S+)\s*(.*)$/i))) return doRoll(cid, d.user.id, m[1], m[2], null, socket);
+      if ((m = t.match(/^\/(?:r|roll)\s+(\S+)\s*(.*)$/i))) return doRoll(cid, d.user.id, m[1], m[2], d.isDM ? d.user.id : null, socket);
       if ((m = t.match(/^\/(?:gmr|gmroll|dmroll)\s+(\S+)\s*(.*)$/i))) return doRoll(cid, d.user.id, m[1], m[2], dmIdOf(cid), socket);
       if ((m = t.match(/^\/(?:w|whisper)\s+("[^"]+"|\S+)\s+([\s\S]+)$/i))) {
         const target = findUserInCampaign(cid, m[1].replace(/"/g, ""));
         if (!target) return socket.emit("toast", `No one called ${m[1]} in this campaign`);
         return postChat(cid, d.user.id, "text", { text: m[2], toName: target.display_name }, target.id);
       }
-      if (t.startsWith("/")) return socket.emit("toast", "Commands: /r 1d20+5, /gmr 1d20 (secret roll to DM), /w name message");
+      if (t.startsWith("/")) return socket.emit("toast", d.isDM ? "Commands: /r 1d20+5 (only you see it), /pr 1d20+5 (show the players), /w name message" : "Commands: /r 1d20+5, /gmr 1d20 (secret roll to DM), /w name message");
       postChat(cid, d.user.id, "text", { text: t });
     });
 
-    socket.on("roll", (p: { expr: string; label?: string; secret?: boolean }) => {
+    socket.on("roll", (p: { expr: string; label?: string; secret?: boolean; public?: boolean }) => {
       if (!d.campaignId || typeof p?.expr !== "string") return;
-      doRoll(d.campaignId, d.user.id, p.expr, String(p.label ?? "").slice(0, 100), p.secret ? dmIdOf(d.campaignId) : null, socket);
+      // The DM's rolls stay behind the screen unless the DM chooses to show one
+      const whisper = d.isDM ? (p.public ? null : d.user.id) : p.secret ? dmIdOf(d.campaignId) : null;
+      doRoll(d.campaignId, d.user.id, p.expr, String(p.label ?? "").slice(0, 100), whisper, socket);
     });
 
     socket.on("ping", (p: { x: number; y: number }) => {
@@ -364,7 +367,8 @@ export function initRealtime(server: HttpServer) {
         const r = rollDice(`1d20${bonus >= 0 ? "+" : ""}${bonus}`);
         const name = String(p.name ?? d.user.display_name).slice(0, 60);
         const hidden = d.isDM && !!p.hidden;
-        postChat(d.campaignId, d.user.id, "roll", { expression: r.expression, label: `${name} initiative`, total: r.total, detail: describeRoll(r), crit: r.crit, dice: diceList(r) }, hidden ? dmIdOf(d.campaignId) : null);
+        // DM initiative rolls (monsters) are private; players' are public
+        postChat(d.campaignId, d.user.id, "roll", { expression: r.expression, label: `${name} initiative`, total: r.total, detail: describeRoll(r), crit: r.crit, dice: diceList(r) }, d.isDM ? d.user.id : null);
         state.entries = state.entries.filter((e) => !(e.ownerId === d.user.id && e.name === name));
         state.entries.push({ id: Date.now() + Math.random(), name, init: r.total, dex: bonus, hidden, ownerId: d.user.id, tokenId: p.tokenId ?? null });
         sortEntries();

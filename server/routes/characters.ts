@@ -185,7 +185,8 @@ characterRoutes.post("/characters/creator-roll", (req, res) => {
   // Everyone at the table sees creation rolls, like rolling at a real table
   if (campaignId) {
     const total = kind === "abilities" ? values.join(", ") : String(values.reduce((a, b) => a + b, 0));
-    postChat(campaignId, uid, "roll", { expression: spec.expr + (spec.times > 1 ? ` ×${spec.times}` : ""), label: `Character creation: ${spec.label}`, total, detail, dice: rolls.flatMap((x) => diceList(x)).slice(0, 30) });
+    const isDMRoller = campaignRole(campaignId, uid) === "dm";
+    postChat(campaignId, uid, "roll", { expression: spec.expr + (spec.times > 1 ? ` ×${spec.times}` : ""), label: `Character creation: ${spec.label}`, total, detail, dice: rolls.flatMap((x) => diceList(x)).slice(0, 30) }, isDMRoller ? uid : null);
   }
   const rollCount = one("SELECT COUNT(*) AS n FROM character_rolls WHERE user_id = ? AND kind = ? AND created_at >= datetime('now', '-1 day')", uid, kind)!.n;
   res.json({ rollId: Number(r.lastInsertRowid), values, detail, rollCount });
