@@ -280,3 +280,17 @@ addColumn("character_changes", "ai_fix", "TEXT");
 addColumn("invites", "campaign_id", "INTEGER REFERENCES campaigns(id) ON DELETE SET NULL");
 addColumn("invites", "note", "TEXT NOT NULL DEFAULT ''");
 addColumn("character_changes", "ai_fix_applied", "INTEGER NOT NULL DEFAULT 0");
+
+// Suggestions for a character, shared only between its player, the campaign DM and the AI
+db.exec(`
+CREATE TABLE IF NOT EXISTS character_suggestions (
+  id INTEGER PRIMARY KEY,
+  character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_kind TEXT NOT NULL, -- player | dm | ai
+  text TEXT NOT NULL,
+  resolved INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_suggestions_char ON character_suggestions(character_id, id);
+`);

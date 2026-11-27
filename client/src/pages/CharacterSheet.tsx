@@ -8,6 +8,7 @@ import {
 import { ALIGNMENTS, EXTRA_CLASSES, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
 import { StatusPill } from "./Home";
 import { FullBody, Portrait } from "../components/Portrait";
+import { Markdown } from "../components/Markdown";
 
 type Roll = (expr: string, label: string) => void;
 
@@ -81,6 +82,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
       {c.lastReview?.status === "approved" && c.lastReview.dmComment && !c.pending && <div className="notice">DM's note on your last approval: "{c.lastReview.dmComment}"</div>}
       {msg && <div className="notice">{msg}</div>}
       {c.isDM && c.campaignId && <DmSecretNotes id={id} initial={c.dmNotes ?? ""} name={d.name} />}
+      {(c.ownerId === status.user?.id || c.isDM) && <Suggestions id={id} name={d.name} isDM={c.isDM} isOwner={c.ownerId === status.user?.id} />}
 
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="card">
@@ -492,6 +494,65 @@ function ChangeHistory({ id }: { id: number }) {
                 </div>
               )}
               {h.dmComment && <div style={{ fontSize: 13, marginTop: 4 }}>💬 DM: {h.dmComment}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Suggestions for this character: only its player, the DM and the AI can see them. */
+function Suggestions({ id, name, isDM, isOwner }: { id: number; name: string; isDM: boolean; isOwner: boolean }) {
+  const { status, toast } = useStatus();
+  const { data, reload } = useLoad<any[]>(`/characters/${id}/suggestions`, [id]);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [focus, setFocus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const openCount = (data ?? []).filter((s) => !s.resolved).length;
+
+  const add = async () => {
+    try { await api.post(`/characters/${id}/suggestions`, { text }); setText(""); reload(); } catch (e) { toast((e as Error).message); }
+  };
+  const askAI = async () => {
+    setBusy(true);
+    try { await api.post(`/characters/${id}/suggestions/ai`, { focus }); setFocus(""); reload(); } catch (e) { toast((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const who = (s: any) => (s.authorKind === "ai" ? "🧙 AI assistant" : s.authorKind === "dm" ? `🎲 ${s.authorName} (DM)` : `🧝 ${s.authorName}`);
+
+  return (
+    <div className="card" style={{ border: "1px dashed #4f8a6a", background: "#18241d" }}>
+      <div className="row">
+        <b className="grow" style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 💡 Suggestions {openCount > 0 && <span className="badge">{openCount}</span>}</b>
+        <span className="muted" style={{ fontSize: 12 }}>Private: only {isOwner ? "you" : `${name}'s player`}, the DM and the AI assistant see this.</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+            {isDM ? "Leave ideas for the player (\"Your patron would love it if you took Pact of the Tome\") or ask the AI. Unlike DM-only notes, the player can read these." : "Ideas for your character from the DM and the AI. You can add your own questions or ideas too."}
+          </p>
+          <div className="row" style={{ marginBottom: 8 }}>
+            <input className="grow" value={text} onChange={(e) => setText(e.target.value)} placeholder={isDM ? "Write a suggestion for the player..." : "Write an idea or a question for your DM..."} onKeyDown={(e) => e.key === "Enter" && text.trim() && add()} />
+            <button disabled={!text.trim()} onClick={add}>Add</button>
+          </div>
+          {status.aiEnabled && (
+            <div className="row" style={{ marginBottom: 10 }}>
+              <input className="grow" value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Optional: what should the AI focus on? e.g. 'which spells at level 5', 'how to roleplay her'" />
+              <button disabled={busy} onClick={askAI}>{busy ? "Thinking..." : "✨ Ask AI for suggestions"}</button>
+            </div>
+          )}
+          {data?.length === 0 && <p className="muted">No suggestions yet.</p>}
+          {data?.map((s) => (
+            <div key={s.id} style={{ borderLeft: `3px solid ${s.authorKind === "ai" ? "var(--gold)" : s.authorKind === "dm" ? "var(--red)" : "var(--green)"}`, padding: "4px 0 6px 10px", marginBottom: 8, opacity: s.resolved ? 0.55 : 1 }}>
+              <div className="row">
+                <b style={{ fontSize: 13 }}>{who(s)}</b>
+                <span className="muted" style={{ fontSize: 12 }}>{s.createdAt}</span>
+                <label className="inline right" style={{ fontSize: 12 }}><input type="checkbox" checked={s.resolved} onChange={(e) => api.patch(`/character-suggestions/${s.id}`, { resolved: e.target.checked }).then(reload)} /> Done</label>
+                {(isDM || s.authorId === status.user?.id) && <button className="small danger" onClick={() => api.del(`/character-suggestions/${s.id}`).then(reload)}>✕</button>}
+              </div>
+              {s.authorKind === "ai" ? <Markdown text={s.text} /> : <div style={{ whiteSpace: "pre-wrap" }}>{s.text}</div>}
             </div>
           ))}
         </div>

@@ -36,7 +36,7 @@ export function campaignAccessById(id: number, userId: number, needDM = false) {
 export function campaignContext(campaignId: number): CampaignContext {
   const c = one("SELECT * FROM campaigns WHERE id = ?", campaignId)!;
   const chars = all(
-    `SELECT c.data, u.display_name, n.notes AS dm_notes FROM characters c JOIN users u ON u.id = c.owner_id
+    `SELECT c.id, c.data, u.display_name, n.notes AS dm_notes FROM characters c JOIN users u ON u.id = c.owner_id
      LEFT JOIN character_dm_notes n ON n.character_id = c.id WHERE c.campaign_id = ? AND c.status = 'approved'`,
     campaignId,
   );
@@ -46,7 +46,10 @@ export function campaignContext(campaignId: number): CampaignContext {
       const dv = derive(d);
       const secret = row.dm_notes?.trim() ? `\n  DM's secret notes about ${d.name} (never reveal these to players directly): ${row.dm_notes.trim().slice(0, 2000)}` : "";
       const story = d.backstory?.trim() ? `\n  Backstory: ${d.backstory.trim().slice(0, 600)}` : "";
-      return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}${story}${secret}`;
+      const sugg = all("SELECT author_kind, text FROM character_suggestions WHERE character_id = ? AND resolved = 0 ORDER BY id DESC LIMIT 3", row.id)
+        .map((s) => `${s.author_kind}: ${String(s.text).replace(/\s+/g, " ").slice(0, 250)}`).join(" | ");
+      const suggLine = sugg ? `\n  Open suggestions shared with ${row.display_name}: ${sugg}` : "";
+      return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}${story}${secret}${suggLine}`;
     })
     .join("\n");
   return { id: c.id, name: c.name, rulesVersion: c.rules_version, dmNotes: c.dm_notes, party, adventure: adventureContext(campaignId) };

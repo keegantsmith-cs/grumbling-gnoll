@@ -4,11 +4,11 @@ import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, num, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap, postChat } from "../realtime.ts";
 import { describeRoll, diceList, rollDice } from "../../shared/dice.ts";
-import { aiEnabled, characterArtPrompt, fixCharacter, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
+import { aiEnabled, characterArtPrompt, characterSuggestions, fixCharacter, reviewCharacter, scanCharacterSheet, type SheetFile } from "../ai.ts";
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown } from "pdf-lib";
 import { discordAlertDM } from "../discord.ts";
 import { characterSheetPdf } from "../sheetpdf.ts";
-import { derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
+import { classSummary, derive, diffCharacter, normalizeCharacter, type CharacterData, type RulesVersion } from "../../shared/character.ts";
 
 export const characterRoutes = Router();
 characterRoutes.use(requireUser);
@@ -417,6 +417,69 @@ characterRoutes.get("/characters/:id/history", (req, res) => {
     };
   }));
 });
+
+// ---------- Private suggestions: only the player, the campaign DM and the AI ----------
+
+function suggestionAccess(characterId: number, userId: number) {
+  const { c, isOwner, isDM } = loadCharacter(characterId, userId);
+  if (!isOwner && !isDM) throw new HttpError(404, "Character not found");
+  return { c, isOwner, isDM };
+}
+const suggestionOut = (s: Row) => ({ id: s.id, authorKind: s.author_kind, authorName: s.author_name ?? (s.author_kind === "ai" ? "AI assistant" : "?"), text: s.text, resolved: !!s.resolved, createdAt: s.created_at, authorId: s.author_id });
+
+characterRoutes.get("/characters/:id/suggestions", (req, res) => {
+  const { c } = suggestionAccess(num(req.params.id), req.user!.id);
+  res.json(all("SELECT s.*, u.display_name AS author_name FROM character_suggestions s LEFT JOIN users u ON u.id = s.author_id WHERE s.character_id = ? ORDER BY s.id DESC LIMIT 100", c.id).map(suggestionOut));
+});
+
+characterRoutes.post("/characters/:id/suggestions", (req, res) => {
+  const { c, isDM } = suggestionAccess(num(req.params.id), req.user!.id);
+  const text = String(req.body?.text ?? "").trim().slice(0, 5000);
+  if (!text) throw new HttpError(400, "Write a suggestion first");
+  run("INSERT INTO character_suggestions (character_id, author_id, author_kind, text) VALUES (?,?,?,?)", c.id, req.user!.id, isDM ? "dm" : "player", text);
+  if (isDM && c.owner_id !== req.user!.id) notifyUser(c.campaign_id, "suggestions");
+  res.json({ ok: true });
+});
+
+characterRoutes.post("/characters/:id/suggestions/ai", async (req, res) => {
+  const { c } = suggestionAccess(num(req.params.id), req.user!.id);
+  if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
+  const rules = rulesOf(c.campaign_id);
+  const d = normalizeCharacter(parseJSON(c.data, {}), rules);
+  // Party summary WITHOUT the DM's secrets (the player will read this)
+  const party = c.campaign_id
+    ? all("SELECT data FROM characters WHERE campaign_id = ? AND status = 'approved' AND id != ?", c.campaign_id, c.id)
+        .map((r) => { const o = normalizeCharacter(parseJSON(r.data, {}), rules); return `- ${o.name}: level ${derive(o).level} ${o.species} ${classSummary(o)}`; }).join("\n")
+    : "";
+  const earlier = all("SELECT text FROM character_suggestions WHERE character_id = ? ORDER BY id DESC LIMIT 8", c.id).map((r) => `- ${String(r.text).slice(0, 300)}`).join("\n");
+  const text = await characterSuggestions({
+    campaignId: c.campaign_id, userId: req.user!.id, campaignName: c.campaign_name ?? "their game", rulesVersion: rules, party,
+    character: { ...d, portraitUrl: undefined, fullBodyUrl: undefined }, derived: derive(d), focus: String(req.body?.focus ?? "").slice(0, 500), earlier,
+  });
+  run("INSERT INTO character_suggestions (character_id, author_id, author_kind, text) VALUES (?,?,?,?)", c.id, null, "ai", text);
+  res.json({ ok: true });
+});
+
+characterRoutes.patch("/character-suggestions/:sid", (req, res) => {
+  const s = one("SELECT * FROM character_suggestions WHERE id = ?", num(req.params.sid));
+  if (!s) throw new HttpError(404, "Not found");
+  suggestionAccess(s.character_id, req.user!.id);
+  if (req.body?.resolved !== undefined) run("UPDATE character_suggestions SET resolved = ? WHERE id = ?", req.body.resolved ? 1 : 0, s.id);
+  res.json({ ok: true });
+});
+
+characterRoutes.delete("/character-suggestions/:sid", (req, res) => {
+  const s = one("SELECT * FROM character_suggestions WHERE id = ?", num(req.params.sid));
+  if (!s) throw new HttpError(404, "Not found");
+  const { isDM } = suggestionAccess(s.character_id, req.user!.id);
+  if (!isDM && s.author_id !== req.user!.id) throw new HttpError(403, "You can only delete your own suggestions");
+  run("DELETE FROM character_suggestions WHERE id = ?", s.id);
+  res.json({ ok: true });
+});
+
+function notifyUser(campaignId: number | null, what: string) {
+  if (campaignId) notify(campaignId, what);
+}
 
 // DM-only notes about a character
 characterRoutes.put("/characters/:id/dm-notes", (req, res) => {

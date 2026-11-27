@@ -713,3 +713,42 @@ ${JSON.stringify(opts.derived, null, 1)}`;
     friendlyError(e);
   }
 }
+
+// ---------- Private suggestions for a character (the player reads these) ----------
+
+export async function characterSuggestions(opts: {
+  campaignId: number | null; userId: number; campaignName: string; rulesVersion: string; party: string;
+  character: unknown; derived: unknown; focus: string; earlier: string;
+}): Promise<string> {
+  const anthropic = getClient();
+  // Deliberately NOT given the DM's private notes or adventure details: the player reads this answer.
+  const system = `${BASE_SYSTEM}\n\nYou are giving friendly, practical advice to a PLAYER about their own character in the campaign "${opts.campaignName}" (D&D 5e, ${opts.rulesVersion} rules). You don't know the DM's plans or secrets; never invent plot spoilers. Keep suggestions legal under the rules and fun to play.`;
+  const prompt = `The party (other characters, for teamwork ideas):
+${opts.party || "(unknown)"}
+
+This character:
+${JSON.stringify(opts.character, null, 1)}
+
+Calculated values:
+${JSON.stringify(opts.derived, null, 1)}
+${opts.earlier ? `\nSuggestions already discussed (don't repeat these):\n${opts.earlier}` : ""}
+
+${opts.focus ? `What they want help with: ${opts.focus}` : "Give a well-rounded set of suggestions."}
+
+Reply in Markdown, under 300 words, with short headings and bullets. Cover what fits: spells or features worth choosing next, tactics in combat, equipment, how this character could work with the rest of the party, and roleplaying ideas drawn from their backstory and personality. Point out anything on the sheet that looks like a mistake.`;
+  try {
+    const msg = await anthropic.beta.messages.create({
+      ...callParams("assistant"),
+      max_tokens: 6000,
+      output_config: { effort: "low" },
+      system,
+      messages: [{ role: "user", content: prompt }],
+    });
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
+    logUsage(opts.campaignId, opts.userId, "character-suggestions", opts.focus || "general", text, msg);
+    return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}
