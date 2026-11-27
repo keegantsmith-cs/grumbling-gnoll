@@ -1,4 +1,5 @@
 // Character sheet data model and 5th Edition math.
+import { SUBCLASS_CASTER } from "./options.ts";
 // Everything calculated here can be overridden by hand on the sheet.
 
 export type Ability = "str" | "dex" | "con" | "int" | "wis" | "cha";
@@ -122,6 +123,7 @@ export interface CharacterData {
   backstory: string;
   notes: string;
   portraitUrl: string;
+  fullBodyUrl: string;
   overrides: {
     proficiencyBonus?: number | null;
     spellSaveDC?: number | null;
@@ -161,6 +163,7 @@ export function blankCharacter(rulesVersion: RulesVersion = "2014"): CharacterDa
     backstory: "",
     notes: "",
     portraitUrl: "",
+    fullBodyUrl: "",
     overrides: {},
   };
 }
@@ -221,7 +224,9 @@ export function classInfo(name: string): ClassInfo | undefined {
 
 function casterTypeOf(cl: ClassLevel): CasterType {
   if (cl.casterOverride) return cl.casterOverride;
-  return classInfo(cl.name)?.caster ?? "none";
+  const base = classInfo(cl.name)?.caster ?? "none";
+  if (base === "none" && SUBCLASS_CASTER[cl.subclass?.trim()]) return SUBCLASS_CASTER[cl.subclass.trim()];
+  return base;
 }
 
 export interface Derived {
@@ -297,7 +302,7 @@ export function derive(c: CharacterData): Derived {
   const castingClasses = c.classes
     .filter((cl) => casterTypeOf(cl) !== "none")
     .sort((a, b) => (Number(b.level) || 0) - (Number(a.level) || 0));
-  const spellAbility = castingClasses.length ? classInfo(castingClasses[0].name)?.spellAbility : undefined;
+  const spellAbility = castingClasses.length ? classInfo(castingClasses[0].name)?.spellAbility ?? (casterTypeOf(castingClasses[0]) === "third" ? "int" : undefined) : undefined;
 
   const dc = spellAbility ? 8 + pb + mods[spellAbility] : undefined;
   const atk = spellAbility ? pb + mods[spellAbility] : undefined;

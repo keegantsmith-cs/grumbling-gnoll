@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { api, downloadFile } from "../api";
 import { go, useLoad, useStatus } from "../hooks";
 import {
-  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, classSummary, derive, fmtMod, mod, normalizeCharacter,
-  type Ability, type CharacterData, type ClassLevel,
+  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, classInfo, classSummary, derive, fmtMod, mod, normalizeCharacter,
+  type Ability, type CharacterData, type ClassLevel, type RulesVersion,
 } from "../../../shared/character";
+import { ALIGNMENTS, EXTRA_CLASSES, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
 import { StatusPill } from "./Home";
-import { Portrait } from "../components/Portrait";
+import { FullBody, Portrait } from "../components/Portrait";
 
 type Roll = (expr: string, label: string) => void;
 
@@ -77,12 +78,17 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
         <div className="card">
           <div className="row top">
             <label className="grow">Name<input value={d.name} onChange={(e) => upd({ name: e.target.value })} /></label>
-            <label className="grow">{d.rulesVersion === "2024" ? "Species" : "Race"}<input value={d.species} onChange={(e) => upd({ species: e.target.value })} /></label>
-            <label className="grow">Background<input value={d.background} onChange={(e) => upd({ background: e.target.value })} /></label>
-            <label>Alignment<input value={d.alignment} onChange={(e) => upd({ alignment: e.target.value })} style={{ width: 130 }} /></label>
+            <Choice className="grow" label={d.rulesVersion === "2024" ? "Species" : "Race"} value={d.species} options={speciesFor(d.rulesVersion)} onChange={(species) => upd({ species })} />
+            <Choice className="grow" label="Background" value={d.background} options={backgroundsFor(d.rulesVersion)} onChange={(background) => upd({ background })} />
+            <Choice label="Alignment" value={d.alignment} options={ALIGNMENTS} onChange={(alignment) => upd({ alignment })} />
             <label>XP<input type="number" value={d.experience} onChange={(e) => upd({ experience: Number(e.target.value) })} style={{ width: 90 }} /></label>
           </div>
-          <ClassesEditor classes={d.classes} onChange={(classes) => upd({ classes })} />
+          <ClassesEditor classes={d.classes} rules={d.rulesVersion} onChange={(classes) => {
+            // Picking the first class sets its saving throw proficiencies (multiclassing doesn't add saves)
+            const first = classInfo(classes[0]?.name ?? "");
+            const changedFirst = classes[0]?.name !== d.classes[0]?.name;
+            upd(first && changedFirst ? { classes, saveProficiencies: first.saves } : { classes });
+          }} />
         </div>
 
         <div className="sheet">
@@ -155,6 +161,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
 
           {/* Attacks, spells, gear, story */}
           <div>
+            <FullBody url={d.fullBodyUrl} canEdit={canEdit} characterId={id} name={d.name} onChange={(fullBodyUrl) => play({ fullBodyUrl }, { fullBodyUrl })} />
             <AttacksEditor d={d} upd={upd} roll={r} />
             <SpellsEditor d={d} dv={dv} upd={upd} play={play} />
             <InventoryEditor d={d} upd={upd} />
@@ -222,15 +229,40 @@ function Pips({ n, filled, color, onSet }: { n: number; filled: number; color: s
   );
 }
 
-function ClassesEditor({ classes, onChange }: { classes: ClassLevel[]; onChange: (c: ClassLevel[]) => void }) {
+const OTHER = "__other__";
+
+/** A dropdown with common choices, plus "Other" to type anything (homebrew, other books). */
+function Choice({ label, value, options, onChange, className, placeholder }: { label: string; value: string; options: string[]; onChange: (v: string) => void; className?: string; placeholder?: string }) {
+  const known = value === "" || options.includes(value);
+  const [custom, setCustom] = useState(!known);
+  useEffect(() => { if (!options.includes(value) && value !== "") setCustom(true); }, [value, options]);
+  return (
+    <label className={className}>
+      {label}
+      {custom ? (
+        <div className="row" style={{ gap: 4, flexWrap: "nowrap", marginTop: 3 }}>
+          <input value={value} autoFocus={value === ""} placeholder={placeholder ?? "Type your own"} onChange={(e) => onChange(e.target.value)} />
+          <button type="button" className="small" title="Pick from the list" onClick={() => { setCustom(false); if (!options.includes(value)) onChange(""); }}>▾</button>
+        </div>
+      ) : (
+        <select value={value} onChange={(e) => { if (e.target.value === OTHER) { setCustom(true); onChange(""); } else onChange(e.target.value); }}>
+          <option value="">Choose...</option>
+          {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          <option value={OTHER}>Other (type your own)...</option>
+        </select>
+      )}
+    </label>
+  );
+}
+
+function ClassesEditor({ classes, rules, onChange }: { classes: ClassLevel[]; rules: RulesVersion; onChange: (c: ClassLevel[]) => void }) {
   const set = (i: number, patch: Partial<ClassLevel>) => onChange(classes.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   return (
     <div>
-      <datalist id="class-names">{CLASSES.map((c) => <option key={c.name} value={c.name} />)}</datalist>
       {classes.map((c, i) => (
         <div key={i} className="row">
-          <label className="grow">Class<input list="class-names" value={c.name} onChange={(e) => set(i, { name: e.target.value })} /></label>
-          <label className="grow">Subclass<input value={c.subclass} onChange={(e) => set(i, { subclass: e.target.value })} /></label>
+          <Choice className="grow" label="Class" value={c.name} options={[...CLASSES.map((x) => x.name), ...EXTRA_CLASSES]} onChange={(name) => set(i, { name, subclass: name === c.name ? c.subclass : "" })} />
+          <Choice className="grow" label="Subclass" value={c.subclass} options={subclassesFor(rules, c.name)} onChange={(subclass) => set(i, { subclass })} placeholder="Subclass (from level 3)" />
           <label>Level<input type="number" min={1} max={20} value={c.level} onChange={(e) => set(i, { level: Number(e.target.value) })} style={{ width: 70 }} /></label>
           <label>Spellcasting
             <select value={c.casterOverride ?? ""} onChange={(e) => set(i, { casterOverride: e.target.value as ClassLevel["casterOverride"] })}>

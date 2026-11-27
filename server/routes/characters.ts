@@ -182,6 +182,12 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
   if (b.pactSlotsUsed !== undefined) data.pactSlotsUsed = Math.max(0, Number(b.pactSlotsUsed) || 0);
   if (b.inspiration !== undefined) data.inspiration = !!b.inspiration;
   if (typeof b.notes === "string") data.notes = b.notes.slice(0, 50000);
+  if (typeof b.fullBodyUrl === "string") {
+    const u = b.fullBodyUrl.trim();
+    if (u && !/^\/uploads\/[\w.-]+$/.test(u)) throw new HttpError(400, "That picture link isn't valid");
+    data.fullBodyUrl = u;
+    run("UPDATE character_changes SET proposed = json_set(proposed, '$.fullBodyUrl', ?) WHERE character_id = ? AND status = 'pending'", u, c.id);
+  }
   // A new portrait doesn't change any rules, so it doesn't need DM approval
   if (typeof b.portraitUrl === "string") {
     const u = b.portraitUrl.trim();
@@ -207,7 +213,7 @@ characterRoutes.post("/characters/:id/art-prompt", async (req, res) => {
   const { c } = loadCharacter(num(req.params.id), req.user!.id, true);
   if (!aiEnabled()) throw new HttpError(400, "AI isn't set up on this server yet");
   const d = normalizeCharacter(parseJSON(c.data, {}));
-  const prompt = await characterArtPrompt(c.campaign_id, req.user!.id, d, String(req.body?.style ?? "").slice(0, 200));
+  const prompt = await characterArtPrompt(c.campaign_id, req.user!.id, d, String(req.body?.style ?? "").slice(0, 200), req.body?.framing === "fullbody" ? "fullbody" : "portrait");
   res.json({ prompt });
 });
 

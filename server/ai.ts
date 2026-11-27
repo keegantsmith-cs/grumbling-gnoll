@@ -452,7 +452,7 @@ The campaign uses the ${opts.rulesVersion} 5e rules (for context only; copy the 
 
 // ---------- Portrait prompt ----------
 
-export async function characterArtPrompt(campaignId: number | null, userId: number, c: { name: string; species: string; classes: { name: string; subclass: string; level: number }[]; background: string; personality: string; backstory: string; features: string; inventory: { name: string; equipped: boolean }[] }, style: string): Promise<string> {
+export async function characterArtPrompt(campaignId: number | null, userId: number, c: { name: string; species: string; classes: { name: string; subclass: string; level: number }[]; background: string; personality: string; backstory: string; features: string; inventory: { name: string; equipped: boolean }[] }, style: string, framing: "portrait" | "fullbody" = "portrait"): Promise<string> {
   const anthropic = getClient();
   const gear = c.inventory.filter((i) => i.equipped).map((i) => i.name).join(", ");
   const info = `Name: ${c.name}\nSpecies: ${c.species}\nClass: ${c.classes.map((x) => `${x.name}${x.subclass ? ` (${x.subclass})` : ""} ${x.level}`).join(" / ")}\nBackground: ${c.background}\nEquipped gear: ${gear}\nPersonality: ${c.personality.slice(0, 1500)}\nBackstory: ${c.backstory.slice(0, 2500)}`;
@@ -464,7 +464,7 @@ export async function characterArtPrompt(campaignId: number | null, userId: numb
       output_config: { effort: "low" },
       messages: [{
         role: "user",
-        content: `Write a prompt for an AI image generator to create a fantasy character portrait of this D&D character. One paragraph, 60-110 words: head-and-shoulders or bust framing, face clearly visible, species features, age, build, hair, clothing/armor, signature gear, expression that fits their personality, simple atmospheric background, lighting. Art style: ${style || "painterly fantasy illustration"}. No text or lettering in the image. Don't use the character's name or any franchise names. Reply with only the prompt.\n\n${info}`,
+        content: `Write a prompt for an AI image generator to create ${framing === "fullbody" ? "a full-body fantasy character illustration" : "a fantasy character portrait"} of this D&D character. One paragraph, 60-110 words: ${framing === "fullbody" ? "full figure head to toe in a characterful standing or action pose, tall vertical composition, full outfit, armor, weapons and gear clearly shown" : "head-and-shoulders or bust framing, face clearly visible"}, species features, age, build, hair, clothing/armor, signature gear, expression that fits their personality, simple atmospheric background, lighting. Art style: ${style || "painterly fantasy illustration"}. No text or lettering in the image. Don't use the character's name or any franchise names. Reply with only the prompt.\n\n${info}`,
       }],
     });
     checkStop(msg);
