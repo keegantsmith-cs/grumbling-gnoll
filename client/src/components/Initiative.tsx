@@ -1,7 +1,8 @@
 import { useState } from "react";
-import type { CampaignSocket } from "../socket";
+import type { CampaignSocket, Token } from "../socket";
 import type { Campaign } from "../pages/Campaign";
 import { useStatus } from "../hooks";
+import { HpBar, tokenForEntry } from "./CombatPanel";
 
 export function InitiativePanel({ campaign, live }: { campaign: Campaign; live: CampaignSocket }) {
   const { status } = useStatus();
@@ -24,7 +25,10 @@ export function InitiativePanel({ campaign, live }: { campaign: Campaign; live: 
             {dm ? (
               <input className="score" type="number" aria-label={`Initiative for ${e.name}`} defaultValue={e.init ?? 0} onBlur={(ev) => emit({ op: "set", id: e.id, init: ev.target.value })} style={{ width: 52, padding: 2 }} />
             ) : <span className="score">{e.init ?? "?"}</span>}
-            <span className="grow">{e.name} {e.hidden && dm && <span className="muted">(hidden)</span>}</span>
+            <span className="grow">
+              {e.name} {e.hidden && dm && <span className="muted">(hidden)</span>}
+              <TokenStatus t={e.hidden && !dm ? undefined : tokenForEntry(e, live.map?.tokens ?? [])} />
+            </span>
             {dm && <button className="small" title={e.hidden ? "Show to players" : "Hide from players"} aria-label={e.hidden ? `Show ${e.name} to players` : `Hide ${e.name} from players`} onClick={() => emit({ op: "set", id: e.id, hidden: !e.hidden })}>{e.hidden ? "🙈" : "👁"}</button>}
             {(dm || e.ownerId === status.user?.id) && dm && <button className="small danger" aria-label={`Remove ${e.name}`} title="Remove from turn order" onClick={() => emit({ op: "remove", id: e.id })}>✕</button>}
           </li>
@@ -52,5 +56,22 @@ export function InitiativePanel({ campaign, live }: { campaign: Campaign; live: 
         </div>
       </form>
     </div>
+  );
+}
+
+/** HP, AC, conditions, concentration and death saves, at a glance under a name in the turn order. */
+function TokenStatus({ t }: { t?: Token }) {
+  if (!t) return null;
+  const conds = t.conditions.split(",").map((c) => c.trim()).filter(Boolean);
+  const down = t.hp != null && t.hp <= 0;
+  const ds = t.deathSaves;
+  return (
+    <span className="init-status">
+      <HpBar t={t} />
+      {t.ac != null && <span className="pill" title="Armor Class">🛡 {t.ac}</span>}
+      {t.concentrating && <span className="pill warn" title={`Concentrating on ${t.concentrating}`}>🔵</span>}
+      {down && ds && t.characterId != null && <span className="pill bad" title={`Death saves: ${ds.successes} successes, ${ds.failures} failures`}>☠ {"✓".repeat(ds.successes) || "–"} / {"✗".repeat(ds.failures) || "–"}</span>}
+      {conds.map((c) => <span key={c} className="pill bad">{c}</span>)}
+    </span>
   );
 }

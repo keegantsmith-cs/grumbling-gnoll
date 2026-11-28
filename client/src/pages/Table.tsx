@@ -16,6 +16,7 @@ import { NpcMaker } from "../components/NpcMaker";
 import { RingEditor, RingsLayer } from "../components/Rings";
 import { EncounterBuilder } from "../components/EncounterBuilder";
 import { PoiCard, PoiLayer } from "../components/Pois";
+import { CombatPanel, tokenForEntry, useOwnedCharacterIds } from "../components/CombatPanel";
 import type { Poi } from "../socket";
 
 type Tool = "select" | "measure" | "ping" | "reveal" | "revealRect" | "hideRect";
@@ -32,12 +33,27 @@ function useHtmlImage(url: string | null | undefined) {
 }
 
 export function TableView({ campaign, live }: { campaign: Campaign; live: CampaignSocket }) {
-  const [side, setSide] = useState<"chat" | "init" | "party" | "key">("chat");
+  const [side, setSide] = useState<"chat" | "init" | "combat" | "party" | "key">("chat");
+  const [combatToken, setCombatToken] = useState<number | null>(null);
   const map = live.map;
+  const { status } = useStatus();
+  const owned = useOwnedCharacterIds(campaign.id, status.user!.id);
+  // When the turn moves on, the combat panel jumps to whoever's turn it is (if it's yours, or you're the DM)
+  const { turn, entries, round } = live.initiative;
+  const turnKey = `${round}:${turn}:${entries[turn]?.id ?? ""}`;
+  useEffect(() => {
+    if (!entries.length || !map) return;
+    const t = tokenForEntry(entries[turn], map.tokens);
+    if (!t) return;
+    const mineToken = campaign.isDM || t.controlledBy === status.user!.id || (t.characterId != null && owned.has(t.characterId));
+    if (!mineToken) return;
+    setCombatToken(t.id);
+    setSide("combat");
+  }, [turnKey]);
   return (
     <div className="table-layout">
       <div className="board">
-        {map ? <Board key={map.id} map={map} campaign={campaign} live={live} /> : (
+        {map ? <Board key={map.id} map={map} campaign={campaign} live={live} onFocusToken={setCombatToken} openCombat={() => setSide("combat")} /> : (
           <div className="center-page muted" style={{ textAlign: "center" }}>
             {campaign.isDM ? <>No map is showing. Open the <b>Maps</b> tab to upload or generate one, then click "Show to players".</> : "The DM hasn't put a map on the table yet. Chat and dice still work!"}
           </div>
@@ -47,11 +63,13 @@ export function TableView({ campaign, live }: { campaign: Campaign; live: Campai
         <div className="side-tabs">
           <button className={side === "chat" ? "active" : ""} onClick={() => setSide("chat")}>Chat & dice</button>
           <button className={side === "init" ? "active" : ""} onClick={() => setSide("init")}>Initiative</button>
+          <button className={side === "combat" ? "active" : ""} onClick={() => setSide("combat")}>⚔ Combat</button>
           <button className={side === "party" ? "active" : ""} onClick={() => setSide("party")}>{campaign.isDM ? "Party" : "My character"}</button>
           {campaign.isDM && map?.dmKey && <button className={side === "key" ? "active" : ""} onClick={() => setSide("key")}>Map key</button>}
         </div>
         {side === "chat" && <ChatPanel campaign={campaign} live={live} />}
         {side === "init" && <div className="side-body"><InitiativePanel campaign={campaign} live={live} /></div>}
+        {side === "combat" && <div className="side-body"><CombatPanel campaign={campaign} live={live} tokenId={combatToken} setTokenId={setCombatToken} /></div>}
         {side === "party" && <div className="side-body"><PartyPanel campaign={campaign} live={live} /></div>}
         {side === "key" && map?.dmKey && (
           <div className="side-body">
@@ -83,7 +101,7 @@ export function TableView({ campaign, live }: { campaign: Campaign; live: Campai
   );
 }
 
-function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; live: CampaignSocket }) {
+function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapState; campaign: Campaign; live: CampaignSocket; onFocusToken: (id: number) => void; openCombat: () => void }) {
   const { status } = useStatus();
   const me = status.user!.id;
   const isDM = campaign.isDM;
@@ -309,7 +327,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           <PoiLayer map={map} scale={view.scale} isDM={isDM} onPick={(p, s) => setPoiOpen({ p, at: s })} />
           {map.tokens.map((t) => (
             <TokenNode key={t.id} t={t} map={map} scale={view.scale} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
-              onSelect={() => setSelected(t.id)} onPress={startLongPress}
+              onSelect={() => { setSelected(t.id); onFocusToken(t.id); }} onPress={startLongPress}
               onMove={(x, y) => live.socket?.emit("token:move", { id: t.id, x, y })} />
           ))}
         </Layer>
@@ -366,7 +384,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
       )}
       {(sel || showAdd) && (
         <div className="token-panel card">
-          {sel ? <TokenEditor t={sel} isDM={isDM} canEdit={canControl(sel)} live={live} close={() => setSelected(null)} campaign={campaign} map={map} />
+          {sel ? <TokenEditor t={sel} isDM={isDM} canEdit={canControl(sel)} live={live} close={() => setSelected(null)} campaign={campaign} map={map} openCombat={openCombat} />
             : <AddToken map={map} view={view} size={size} isDM={isDM} campaign={campaign} live={live} close={() => setShowAdd(false)} />}
         </div>
       )}
@@ -431,7 +449,7 @@ function TokenNode({ t, map, scale, draggable, selected, onSelect, onPress, onMo
           <Rect x={-r} y={-r - 9} width={r * 2 * hpPct} height={6} fill={hpPct > 0.5 ? "#5cb85c" : hpPct > 0.25 ? "#e0a030" : "#d9534f"} cornerRadius={3} />
         </>
       )}
-      {t.conditions && <Text text="●" fill="#c77dff" fontSize={r * 0.6} x={r * 0.5} y={-r} />}
+      <TokenBadges t={t} r={r} />
       {t.hp != null && t.hp <= 0 && (
         <>
           <Line points={[-r * 0.6, -r * 0.6, r * 0.6, r * 0.6]} stroke="#d9534f" strokeWidth={r * 0.18} lineCap="round" />
@@ -439,6 +457,38 @@ function TokenNode({ t, map, scale, draggable, selected, onSelect, onPress, onMo
         </>
       )}
     </Group>
+  );
+}
+
+/** Condition letters, concentration, temporary HP, AC and death saves drawn on the token itself. */
+function TokenBadges({ t, r }: { t: Token; r: number }) {
+  const conds = t.conditions.split(",").map((c) => c.trim()).filter(Boolean).slice(0, 4);
+  const d = Math.max(14, r * 0.5);
+  const down = t.hp != null && t.hp <= 0 && t.characterId != null && t.deathSaves;
+  return (
+    <>
+      {conds.map((c, i) => (
+        <Group key={c} x={r * 0.55 + (i % 2) * d * 0.9} y={-r + Math.floor(i / 2) * d * 0.9}>
+          <Circle radius={d / 2} fill="#7a3fa0" stroke="#111" strokeWidth={1} />
+          <Text text={c.slice(0, 1).toUpperCase()} fontSize={d * 0.6} fill="#fff" fontStyle="bold" width={d} x={-d / 2} y={-d * 0.3} align="center" />
+        </Group>
+      ))}
+      {t.concentrating && (
+        <Group x={-r * 0.8} y={-r * 0.6}>
+          <Circle radius={d / 2} fill="#2a6fc7" stroke="#111" strokeWidth={1} />
+          <Text text="C" fontSize={d * 0.6} fill="#fff" fontStyle="bold" width={d} x={-d / 2} y={-d * 0.3} align="center" />
+        </Group>
+      )}
+      {t.hp == null && t.health && t.health !== "healthy" && <Text text={t.health} fontSize={Math.max(11, r * 0.4)} fill={t.health === "bloodied" ? "#f0b050" : "#ff7a63"} fontStyle="bold" width={r * 2} x={-r} y={-r - 16} align="center" />}
+      {!!t.tempHp && <Text text={`+${t.tempHp}`} fontSize={Math.max(11, r * 0.4)} fill="#7fc4ff" fontStyle="bold" x={-r} y={-r - 24} />}
+      {t.ac != null && (
+        <Group x={r * 0.7} y={r * 0.7}>
+          <Circle radius={d * 0.62} fill="#33291f" stroke="#e3b866" strokeWidth={1} />
+          <Text text={String(t.ac)} fontSize={d * 0.62} fill="#e3b866" fontStyle="bold" width={d * 1.4} x={-d * 0.7} y={-d * 0.3} align="center" />
+        </Group>
+      )}
+      {down && <Text text={`${"✓".repeat(t.deathSaves!.successes)}${"✗".repeat(t.deathSaves!.failures)}` || "☠"} fontSize={Math.max(12, r * 0.45)} fill="#ff9b85" fontStyle="bold" width={r * 2} x={-r} y={r * 0.1} align="center" />}
+    </>
   );
 }
 
@@ -466,21 +516,13 @@ function TokenLabel({ t, r, cell, scale, focus }: { t: Token; r: number; cell: n
   );
 }
 
-function useOwnedCharacterIds(campaignId: number, me: number) {
-  const [ids, setIds] = useState<Set<number>>(new Set());
-  useEffect(() => {
-    api.get<any[]>(`/characters?campaignId=${campaignId}`).then((cs) => setIds(new Set(cs.filter((c) => c.ownerId === me).map((c) => c.id)))).catch(() => {});
-  }, [campaignId, me]);
-  return ids;
-}
-
-function TokenEditor({ t, isDM, canEdit, live, close, campaign, map }: { t: Token; isDM: boolean; canEdit: boolean; live: CampaignSocket; close: () => void; campaign: Campaign; map: MapState }) {
+function TokenEditor({ t, isDM, canEdit, live, close, campaign, map, openCombat }: { t: Token; isDM: boolean; canEdit: boolean; live: CampaignSocket; close: () => void; campaign: Campaign; map: MapState; openCombat: () => void }) {
   const [f, setF] = useState(t);
   useEffect(() => setF(t), [t]);
   const save = (patch: Partial<Token>) => live.socket?.emit("token:update", { id: t.id, ...patch });
   return (
     <div>
-      <div className="panel-head"><h3>{t.name}</h3><button className="small" aria-label="Close" onClick={close}>✕</button></div>
+      <div className="panel-head"><h3>{t.name}</h3>{canEdit && <button className="small" onClick={openCombat} title="Open this token in the Combat tab">⚔ Combat</button>}<button className="small" aria-label="Close" onClick={close}>✕</button></div>
       {!canEdit && <p className="muted">You can't control this token.</p>}
       {canEdit && (
         <>

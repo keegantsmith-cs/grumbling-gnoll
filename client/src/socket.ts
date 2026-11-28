@@ -5,6 +5,7 @@ import { announceRoll } from "./components/DiceTray";
 export interface Token {
   id: number; name: string; x: number; y: number; size: number; color: string; imageUrl: string | null;
   characterId: number | null; controlledBy: number | null; hidden: boolean; hp: number | null; maxHp: number | null; conditions: string;
+  ac?: number | null; tempHp?: number; health?: "healthy" | "bloodied" | "near death" | "down" | null; concentrating?: string; deathSaves?: { successes: number; failures: number };
   rings: Ring[]; meta: { speed?: number; otherSpeeds?: { kind: string; feet: number }[]; vision?: { kind: string; feet: number }[]; attacks?: { name: string; reach?: number; normal?: number; long?: number }[] };
 }
 export interface Ring { label: string; feet: number; color: string; kind: "ring" | "sight" }
@@ -48,6 +49,7 @@ export function useCampaignSocket(campaignId: number, onToast: (m: string) => vo
       setChat((c) => [...c.slice(-300), msg]);
       if (msg.kind === "roll") announceRoll({ name: msg.name, body: msg.body });
     });
+    s.on("chat:update", (msg: ChatMsg) => setChat((c) => c.map((m) => (m.id === msg.id ? msg : m))));
     s.on("initiative", setInitiative);
     s.on("presence", setPresence);
     s.on("toast", (m: string) => toastRef.current(m));

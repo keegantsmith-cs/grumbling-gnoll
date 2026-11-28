@@ -6,6 +6,8 @@ import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
 import { derive, normalizeCharacter } from "../shared/character.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
+import { publicHealth, registerCombat, turnChanged } from "./combat.ts";
+import type { MonsterCombat } from "../shared/combat.ts";
 
 let io: Server;
 
@@ -18,7 +20,7 @@ function parseCookie(header: string): Record<string, string> {
   return out;
 }
 
-interface SocketData {
+export interface SocketData {
   user: Row;
   campaignId?: number;
   isDM?: boolean;
@@ -51,7 +53,7 @@ export function pointRevealed(fog: Row[], x: number, y: number) {
 }
 
 /** Fog settings of a map, read once so several tokens can be checked against them. */
-function fogOf(mapId: number) {
+export function fogOf(mapId: number) {
   const m = one("SELECT fog_enabled, fog FROM maps WHERE id = ?", mapId);
   return { enabled: !!m?.fog_enabled, shapes: parseJSON<Row[]>(m?.fog, []) };
 }
@@ -61,7 +63,7 @@ function fogOf(mapId: number) {
  * Players never get hidden tokens, and (with fog of war on) nothing standing in fog,
  * except player characters and tokens handed to players, which they always get.
  */
-function tokenVisible(t: Row, isDM: boolean, fog: { enabled: boolean; shapes: Row[] }) {
+export function tokenVisible(t: Row, isDM: boolean, fog: { enabled: boolean; shapes: Row[] }) {
   if (isDM) return true;
   if (t.hidden) return false;
   if (!fog.enabled) return true;
@@ -121,22 +123,24 @@ function tokenOut(t: Row, isDM: boolean) {
     hp: hideHp ? (t.hp != null && t.hp <= 0 ? 0 : null) : t.hp,
     maxHp: hideHp ? null : t.max_hp,
     conditions: t.conditions,
+    ...publicHealth(t, isDM),
     rings: parseJSON(t.rings, []),
-    meta: parseJSON(t.meta, {}),
+    // A monster's movement and attack names come from its stat block: only the DM gets them
+    meta: hideHp ? {} : parseJSON(t.meta, {}),
   };
 }
 
-function chatOut(c: Row) {
+export function chatOut(c: Row) {
   return { id: c.id, userId: c.user_id, name: c.name ?? "System", kind: c.kind, body: parseJSON(c.body, {}), whisperTo: c.whisper_to, createdAt: c.created_at };
 }
 
-function canSee(msg: { userId: number | null; whisperTo: number | null }, userId: number, isDM: boolean) {
+export function canSee(msg: { userId: number | null; whisperTo: number | null }, userId: number, isDM: boolean) {
   if (msg.whisperTo == null) return true;
   return isDM || msg.userId === userId || msg.whisperTo === userId;
 }
 
 /** Send something to everyone in a campaign, letting each person get their own version (DM vs player). */
-function eachSocket(campaignId: number, fn: (s: Socket, data: SocketData) => void) {
+export function eachSocket(campaignId: number, fn: (s: Socket, data: SocketData) => void) {
   for (const s of io.sockets.adapter.rooms.get(room(campaignId)) ?? []) {
     const sock = io.sockets.sockets.get(s);
     if (sock) fn(sock, sock.data as SocketData);
@@ -220,7 +224,7 @@ function findUserInCampaign(campaignId: number, name: string): Row | undefined {
   );
 }
 
-function dmIdOf(campaignId: number): number {
+export function dmIdOf(campaignId: number): number {
   return one("SELECT dm_user_id FROM campaigns WHERE id = ?", campaignId)!.dm_user_id;
 }
 
@@ -243,7 +247,7 @@ function canMoveToken(t: Row, d: SocketData) {
   return false;
 }
 
-function tokenOnActiveMap(tokenId: number, campaignId: number) {
+export function tokenOnActiveMap(tokenId: number, campaignId: number) {
   return one(
     "SELECT t.* FROM tokens t JOIN maps m ON m.id = t.map_id WHERE t.id = ? AND m.campaign_id = ?",
     tokenId,
@@ -316,6 +320,8 @@ export function initRealtime(server: HttpServer) {
       const whisper = d.isDM ? (p.public ? null : d.user.id) : p.secret ? dmIdOf(d.campaignId) : null;
       doRoll(d.campaignId, d.user.id, p.expr, String(p.label ?? "").slice(0, 100), whisper, socket);
     });
+
+    registerCombat(socket);
 
     socket.on("ping", (p: { x: number; y: number }) => {
       if (!d.campaignId) return;
@@ -492,6 +498,7 @@ export function initRealtime(server: HttpServer) {
       if (!d.campaignId) return;
       const c = one("SELECT initiative FROM campaigns WHERE id = ?", d.campaignId)!;
       const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
+      let prevEntry: Row | undefined, prevRound = state.round;
       const sortEntries = () => state.entries.sort((a, b) => b.init - a.init || (b.dex ?? 0) - (a.dex ?? 0));
       if (p.op === "roll") {
         // Server rolls initiative so nobody can fudge it: d20 + bonus, posted to chat too.
@@ -524,6 +531,7 @@ export function initRealtime(server: HttpServer) {
         sortEntries();
       } else if (p.op === "next") {
         if (state.entries.length) {
+          prevEntry = state.entries[state.turn]; prevRound = state.round;
           state.turn++;
           let newRound = false;
           if (state.turn >= state.entries.length) { state.turn = 0; state.round++; newRound = true; }
@@ -539,6 +547,8 @@ export function initRealtime(server: HttpServer) {
       }
       run("UPDATE campaigns SET initiative = ? WHERE id = ?", JSON.stringify(state), d.campaignId);
       broadcastInitiative(d.campaignId);
+      // Reminders: effects that wear off, death saves, recharge rolls
+      if (p.op === "next" && state.entries.length) turnChanged(d.campaignId, { prev: prevEntry, prevRound, cur: state.entries[state.turn], round: state.round });
     });
   });
 }
@@ -553,6 +563,8 @@ function presence(campaignId: number) {
 
 export interface MonsterDrop {
   meta?: Record<string, unknown>;
+  /** The monster's stat-block numbers and actions, kept on the token for the DM's combat panel (never sent to players) */
+  combat?: MonsterCombat;
   name: string; count: number; hitPoints: number; hitDice?: string; rollHp?: boolean; size?: number; color?: string;
   hidden?: boolean; initiative?: "none" | "each" | "group"; dexMod?: number; x?: number; y?: number; imageUrl?: string | null;
 }
@@ -587,8 +599,8 @@ export function addMonsterTokens(campaignId: number, userId: number, m: MonsterD
     const snapTo = (v: number, off: number) => (Math.round(size) % 2 === 0 ? Math.round((v - off) / g) * g + off : Math.floor((v - off) / g) * g + off + g / 2);
     const x = snapTo(x0 + (i % perRow) * step, map.grid_offset_x || 0), y = snapTo(y0 + Math.floor(i / perRow) * step, map.grid_offset_y || 0);
     const r = run(
-      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp, JSON.stringify(m.meta ?? {}),
+      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp, meta, ac, combat) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp, JSON.stringify(m.meta ?? {}), m.combat?.ac ?? null, JSON.stringify(m.combat ?? {}),
     );
     if (m.initiative && m.initiative !== "none") {
       const init = groupInit ?? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total;
