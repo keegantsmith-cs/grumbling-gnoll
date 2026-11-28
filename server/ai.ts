@@ -73,6 +73,11 @@ function getClient(): Anthropic {
   return client;
 }
 
+/** Tests only: swap in a fake AI client to check exactly what each request is given. */
+export function setAIClientForTests(c: unknown) {
+  client = c as Anthropic | null;
+}
+
 export class AIError extends Error {}
 
 type Effort = "low" | "medium" | "high";
@@ -755,37 +760,65 @@ Reply in Markdown, under 300 words, with short headings and bullets. Cover what 
 
 // ---------- Session recaps ----------
 
-const RecapSchema = z.object({
+const PlayerRecapSchema = z.object({
   title: z.string(),
   player_recap: z.string(),
+});
+const DmRecapSchema = z.object({
   dm_notes: z.string(),
 });
-export type SessionRecap = z.infer<typeof RecapSchema>;
+export type SessionRecap = { title: string; player_recap: string; dm_notes: string };
 
-export async function writeSessionRecap(ctx: CampaignContext, userId: number, log: string, dmExtra: string): Promise<SessionRecap> {
+/**
+ * Two separate AI requests, so the recap players read is written WITHOUT any DM-only context:
+ * - players' recap: public campaign facts + the public part of the log only (no whispers, secret rolls, DM notes, adventure)
+ * - DM notes: everything, for the DM's eyes only
+ */
+export async function writeSessionRecap(
+  publicCtx: CampaignContext, dmCtx: CampaignContext, userId: number,
+  log: { publicText: string; fullText: string }, extra: string,
+): Promise<SessionRecap> {
   const anthropic = getClient();
-  const prompt = `Here is the table log from our latest D&D session (chat, dice rolls, things the DM shared, and turn order). Lines marked [private] were whispers or secret rolls.
+  const extraLine = extra ? `\nThe DM adds (things said out loud at the table): ${extra}` : "";
+  const playerPrompt = `Here is the table log from our latest D&D session (chat, dice rolls and things the DM shared).
 
-${log}
-${dmExtra ? `\nThe DM adds: ${dmExtra}` : ""}
+${log.publicText || "(no public chat)"}
+${extraLine}
 
 Write:
 - title: a short, evocative title for the session (like a TV episode).
-- player_recap: a recap the PLAYERS will read at the start of next session, in Markdown, 150-300 words, written like a storyteller ("Previously, on..."), covering what the party did, who they met, what they found and where they stopped. Mention the characters by name and highlight a couple of memorable moments (great or terrible rolls). Never reveal anything from [private] lines, the DM's secret notes, or plot the players haven't discovered.
-- dm_notes: notes for the DM only, in Markdown bullets: loose threads and promises, NPC attitudes that changed, treasure handed out, things players seemed excited about, and ideas for next session. These may use private information.
+- player_recap: a recap the PLAYERS will read at the start of next session, in Markdown, 150-300 words, written like a storyteller ("Previously, on..."), covering what the party did, who they met, what they found and where they stopped. Mention the characters by name and highlight a couple of memorable moments (great or terrible rolls).
+If the log is thin, keep it short and don't invent events.`;
+  const dmPrompt = `Here is the table log from our latest D&D session (chat, dice rolls, things the DM shared, and turn order). Lines marked [private] were whispers or secret rolls.
+
+${log.fullText}
+${extraLine}
+
+Write dm_notes: notes for the DM only, in Markdown bullets: loose threads and promises, NPC attitudes that changed, treasure handed out, things players seemed excited about, and ideas for next session. These may use private information.
 If the log is thin, keep it short and don't invent events.`;
   try {
-    const msg = await anthropic.beta.messages.parse({
-      ...callParams("assistant"),
-      max_tokens: 12000,
-      output_config: { effort: "low", format: betaZodOutputFormat(RecapSchema) },
-      system: campaignSystem(ctx),
-      messages: [{ role: "user", content: prompt }],
-    });
-    checkStop(msg);
-    if (!msg.parsed_output) throw new AIError("The recap came back in an unexpected format. Try again.");
-    logUsage(ctx.id, userId, "session-recap", msg.parsed_output.title, msg.parsed_output, msg);
-    return msg.parsed_output;
+    const [pm, dm] = await Promise.all([
+      anthropic.beta.messages.parse({
+        ...callParams("assistant"),
+        max_tokens: 8000,
+        output_config: { effort: "low", format: betaZodOutputFormat(PlayerRecapSchema) },
+        system: campaignSystem(publicCtx),
+        messages: [{ role: "user", content: playerPrompt }],
+      }),
+      anthropic.beta.messages.parse({
+        ...callParams("assistant"),
+        max_tokens: 8000,
+        output_config: { effort: "low", format: betaZodOutputFormat(DmRecapSchema) },
+        system: campaignSystem(dmCtx),
+        messages: [{ role: "user", content: dmPrompt }],
+      }),
+    ]);
+    checkStop(pm);
+    checkStop(dm);
+    if (!pm.parsed_output || !dm.parsed_output) throw new AIError("The recap came back in an unexpected format. Try again.");
+    logUsage(publicCtx.id, userId, "session-recap", pm.parsed_output.title, pm.parsed_output, pm);
+    logUsage(dmCtx.id, userId, "session-recap", `${pm.parsed_output.title} (DM notes)`, dm.parsed_output, dm);
+    return { ...pm.parsed_output, dm_notes: dm.parsed_output.dm_notes };
   } catch (e) {
     friendlyError(e);
   }

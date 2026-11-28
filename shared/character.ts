@@ -44,6 +44,8 @@ export interface ClassInfo {
   saves: Ability[];
   caster: CasterType;
   spellAbility?: Ability;
+  /** Artificer: a half caster that rounds UP and casts from level 1, alone or multiclassed */
+  roundsUp?: boolean;
 }
 
 // Core classes (names and mechanics from the free 5e SRD). Players can also type a custom class.
@@ -218,8 +220,14 @@ function pactSlots(level: number): { count: number; level: number } {
   return { count, level: slotLevel };
 }
 
+// Classes outside the SRD that players may type in: only the game math, so their sheets work (not offered in the creator).
+const EXTRA_CLASS_INFO: ClassInfo[] = [
+  { name: "Artificer", hitDie: 8, saves: ["con", "int"], caster: "half", spellAbility: "int", roundsUp: true },
+];
+
 export function classInfo(name: string): ClassInfo | undefined {
-  return CLASSES.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
+  const n = name.trim().toLowerCase();
+  return CLASSES.find((c) => c.name.toLowerCase() === n) ?? EXTRA_CLASS_INFO.find((c) => c.name.toLowerCase() === n);
 }
 
 function casterTypeOf(cl: ClassLevel): CasterType {
@@ -227,6 +235,63 @@ function casterTypeOf(cl: ClassLevel): CasterType {
   const base = classInfo(cl.name)?.caster ?? "none";
   if (base === "none" && SUBCLASS_CASTER[cl.subclass?.trim()]) return SUBCLASS_CASTER[cl.subclass.trim()];
   return base;
+}
+
+// SRD armor: base AC and type. Matched against equipped items by name ("Chain Mail", "+1 studded leather armor"...).
+const ARMOR: Record<string, { base: number; type: "light" | "medium" | "heavy" }> = {
+  padded: { base: 11, type: "light" }, leather: { base: 11, type: "light" }, "studded leather": { base: 12, type: "light" },
+  hide: { base: 12, type: "medium" }, "chain shirt": { base: 13, type: "medium" }, "scale mail": { base: 14, type: "medium" },
+  breastplate: { base: 14, type: "medium" }, "half plate": { base: 15, type: "medium" },
+  "ring mail": { base: 14, type: "heavy" }, "chain mail": { base: 16, type: "heavy" }, splint: { base: 17, type: "heavy" }, plate: { base: 18, type: "heavy" },
+};
+
+/** "+1 Chain Mail Armor" -> { key: "chain mail", bonus: 1 }. */
+function armorName(raw: string) {
+  const bonus = Number(raw.match(/\+(\d)/)?.[1] ?? 0);
+  const key = raw.toLowerCase().replace(/\+\d/g, "").replace(/\b(armou?r|suit of|a)\b/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  return { key, bonus };
+}
+
+/** True for SRD armor and shields, so new characters start out wearing them. */
+export function isArmorOrShield(name: string) {
+  const { key } = armorName(name);
+  return key === "shield" || key in ARMOR;
+}
+
+/** Armor Class worked out from worn armor, a shield, and Unarmored Defense. Returns the AC and a short explanation. */
+export function autoArmorClass(c: CharacterData, mods: Record<Ability, number>): { ac: number; source: string } {
+  let armor: { name: string; base: number; type: "light" | "medium" | "heavy"; bonus: number } | null = null;
+  let shield: { name: string; bonus: number } | null = null;
+  for (const it of c.inventory) {
+    if (!it.equipped || !it.name) continue;
+    const { key, bonus } = armorName(it.name);
+    if (key === "shield") shield ??= { name: it.name, bonus };
+    else if (ARMOR[key] && (!armor || ARMOR[key].base + bonus > armor.base + armor.bonus)) armor = { name: it.name, ...ARMOR[key], bonus };
+  }
+  const levelIn = (name: string) => c.classes.filter((cl) => cl.name.trim().toLowerCase() === name).reduce((n, cl) => n + (Number(cl.level) || 0), 0);
+  const shieldAc = shield ? 2 + shield.bonus : 0;
+  const withShield = (ac: number, src: string) => ({ ac: ac + shieldAc, source: shield ? `${src} + ${shield.name}` : src });
+  if (armor) {
+    const dex = armor.type === "light" ? mods.dex : armor.type === "medium" ? Math.min(2, mods.dex) : 0;
+    return withShield(armor.base + armor.bonus + dex, armor.name);
+  }
+  // No armor: the best of 10 + Dex, Unarmored Defense (Barbarian: + Con; Monk: + Wis, no shield) and Draconic Resilience
+  const options: { ac: number; source: string }[] = [withShield(10 + mods.dex, "10 + Dex")];
+  if (levelIn("barbarian") > 0) options.push(withShield(10 + mods.dex + mods.con, "Unarmored Defense (Dex + Con)"));
+  if (levelIn("monk") > 0 && !shield) options.push({ ac: 10 + mods.dex + mods.wis, source: "Unarmored Defense (Dex + Wis)" });
+  if (levelIn("sorcerer") > 0 && c.classes.some((cl) => /draconic/i.test(cl.subclass ?? ""))) options.push(withShield(13 + mods.dex, "Draconic Resilience (13 + Dex)"));
+  return options.reduce((best, o) => (o.ac > best.ac ? o : best));
+}
+
+/** Extra hit points per level from the Tough feat (+2) and Dwarven Toughness (+1: Hill Dwarf in 2014, every Dwarf in 2024). */
+export function bonusHpPerLevel(c: CharacterData): { perLevel: number; sources: string[] } {
+  const sources: string[] = [];
+  let perLevel = 0;
+  // "Tough" written as its own entry in Features (a line like "Tough", "- Tough", "Feat: Tough"), not "Toughness"
+  if (/(^|\n)\s*(?:[-*•]\s*)?(?:\*\*)?(?:feat:\s*)?tough(?:\*\*)?(?![a-z])/i.test(c.features ?? "")) { perLevel += 2; sources.push("Tough"); }
+  const sp = (c.species ?? "").toLowerCase();
+  if (c.rulesVersion === "2024" ? /\bdwarf\b/.test(sp) : /hill dwarf/.test(sp)) { perLevel += 1; sources.push("Dwarven Toughness"); }
+  return { perLevel, sources };
 }
 
 export interface Derived {
@@ -237,11 +302,15 @@ export interface Derived {
   skills: Record<string, number>;
   initiative: number;
   ac: number;
+  /** How the automatic AC was worked out, e.g. "Chain Mail + Shield" (empty when typed in by hand) */
+  acSource: string;
   maxHp: number;
   passivePerception: number;
   spellAbility?: Ability;
   spellSaveDC?: number;
   spellAttack?: number;
+  /** One entry per spellcasting class (highest level first) */
+  casters: { className: string; ability: Ability; dc: number; attack: number }[];
   spellSlots: number[]; // 9 entries
   pact: { count: number; level: number };
   hitDice: string;
@@ -274,7 +343,9 @@ export function derive(c: CharacterData): Derived {
       first = false;
     }
   }
+  autoHp += bonusHpPerLevel(c).perLevel * level;
   const maxHp = c.hp.max ?? Math.max(1, autoHp);
+  const autoAc = autoArmorClass(c, mods);
 
   // Spell slots (multiclass rules). A single casting class uses its own table (half/third round up).
   // Multiclassed: 2014 rounds half and third casters down; 2024 rounds half casters up, third casters down.
@@ -285,7 +356,7 @@ export function derive(c: CharacterData): Derived {
     const t = casterTypeOf(cl);
     const lv = Number(cl.level) || 0;
     if (t === "full") casterLevel += lv;
-    else if (t === "half") casterLevel += casting.length === 1 || is2024 ? Math.ceil(lv / 2) : Math.floor(lv / 2);
+    else if (t === "half") casterLevel += casting.length === 1 || is2024 || classInfo(cl.name)?.roundsUp ? Math.ceil(lv / 2) : Math.floor(lv / 2);
     else if (t === "third") casterLevel += casting.length === 1 ? Math.ceil(lv / 3) : Math.floor(lv / 3);
   }
   // A lone third-caster gets no slots before level 3. A lone half-caster gets none at level 1
@@ -293,7 +364,7 @@ export function derive(c: CharacterData): Derived {
   if (casting.length === 1) {
     const t = casterTypeOf(casting[0]);
     const lv = Number(casting[0].level) || 0;
-    if ((t === "half" && lv < 2 && !is2024) || (t === "third" && lv < 3)) casterLevel = 0;
+    if ((t === "half" && lv < 2 && !is2024 && !classInfo(casting[0].name)?.roundsUp) || (t === "third" && lv < 3)) casterLevel = 0;
   }
   const row = casterLevel > 0 ? SLOT_TABLE[Math.min(20, casterLevel) - 1] : [];
   const spellSlots = Array.from({ length: 9 }, (_, i) => row[i] ?? 0);
@@ -307,6 +378,13 @@ export function derive(c: CharacterData): Derived {
     .sort((a, b) => (Number(b.level) || 0) - (Number(a.level) || 0));
   const spellAbility = castingClasses.length ? classInfo(castingClasses[0].name)?.spellAbility ?? (casterTypeOf(castingClasses[0]) === "third" ? "int" : undefined) : undefined;
 
+  // Each casting class has its own save DC and attack (they differ when the classes use different abilities)
+  const casters: { className: string; ability: Ability; dc: number; attack: number }[] = [];
+  for (const cl of castingClasses) {
+    const ab = classInfo(cl.name)?.spellAbility ?? (casterTypeOf(cl) === "third" ? "int" : undefined);
+    if (ab && !casters.some((x) => x.className === cl.name)) casters.push({ className: cl.name, ability: ab, dc: 8 + pb + mods[ab], attack: pb + mods[ab] });
+  }
+
   const dc = spellAbility ? 8 + pb + mods[spellAbility] : undefined;
   const atk = spellAbility ? pb + mods[spellAbility] : undefined;
 
@@ -317,12 +395,14 @@ export function derive(c: CharacterData): Derived {
     saves,
     skills,
     initiative: mods.dex + (Number(c.initiativeBonus) || 0),
-    ac: c.ac ?? 10 + mods.dex,
+    ac: c.ac ?? autoAc.ac,
+    acSource: c.ac == null ? autoAc.source : "",
     maxHp,
     passivePerception: c.overrides.passivePerception ?? 10 + skills.perception,
     spellAbility,
     spellSaveDC: c.overrides.spellSaveDC ?? dc,
     spellAttack: c.overrides.spellAttack ?? atk,
+    casters,
     spellSlots,
     pact,
     hitDice: hitDiceParts.join(" + "),

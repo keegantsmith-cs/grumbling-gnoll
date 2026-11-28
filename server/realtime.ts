@@ -4,6 +4,7 @@ import { Server, type Socket } from "socket.io";
 import { all, one, parseJSON, run, type Row } from "./db.ts";
 import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
+import { derive, normalizeCharacter } from "../shared/character.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
 
 let io: Server;
@@ -53,11 +54,15 @@ export function mapPayload(mapId: number | null, isDM: boolean) {
     // Points of interest: the DM sees everything; players only see revealed markers, without the DM's notes
     pois: parseJSON<Row[]>(m.pois, []).filter((p) => isDM || p.revealed).map((p) => (isDM ? p : { id: p.id, kind: p.kind, label: p.label, title: p.title, x: p.x, y: p.y, revealed: true })),
     enrichment: isDM ? parseJSON(m.enrichment, {}) : undefined,
-    tokens: tokens.map(tokenOut),
+    tokens: tokens.map((t) => tokenOut(t, isDM)),
   };
 }
 
-function tokenOut(t: Row) {
+function tokenOut(t: Row, isDM: boolean) {
+  // Monster HP is DM-only: players just see when a monster is down (0 HP), never its numbers or health bar.
+  // Player characters (and tokens the DM hands to a player) keep their HP visible to everyone.
+  const monster = !t.character_id && !t.controlled_by;
+  const hideHp = !isDM && monster;
   return {
     id: t.id,
     name: t.name,
@@ -69,8 +74,8 @@ function tokenOut(t: Row) {
     characterId: t.character_id,
     controlledBy: t.controlled_by,
     hidden: !!t.hidden,
-    hp: t.hp,
-    maxHp: t.max_hp,
+    hp: hideHp ? (t.hp != null && t.hp <= 0 ? 0 : null) : t.hp,
+    maxHp: hideHp ? null : t.max_hp,
     conditions: t.conditions,
     rings: parseJSON(t.rings, []),
     meta: parseJSON(t.meta, {}),
@@ -328,6 +333,15 @@ export function initRealtime(server: HttpServer) {
         if (p.hidden !== undefined) fields.hidden = p.hidden ? 1 : 0;
         if (p.maxHp !== undefined) fields.max_hp = p.maxHp === null || p.maxHp === "" ? null : Number(p.maxHp);
         if (p.controlledBy !== undefined) fields.controlled_by = p.controlledBy ? Number(p.controlledBy) : null;
+      }
+      // ...and never above the maximum (the character's sheet maximum, or the token's Max HP)
+      if (typeof fields.hp === "number") {
+        let max: number | null = fields.max_hp !== undefined ? (fields.max_hp as number | null) : t.max_hp;
+        if (t.character_id) {
+          const ch = one("SELECT data FROM characters WHERE id = ?", t.character_id);
+          if (ch) max = derive(normalizeCharacter(parseJSON(ch.data, {}))).maxHp;
+        }
+        if (max != null && max > 0) fields.hp = Math.min(max, fields.hp);
       }
       const keys = Object.keys(fields);
       if (!keys.length) return;

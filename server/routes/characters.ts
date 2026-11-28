@@ -242,7 +242,12 @@ characterRoutes.patch("/characters/:id/play", (req, res) => {
   const data = normalizeCharacter(parseJSON(c.data, {}), rulesOf(c.campaign_id));
   const b = req.body ?? {};
   if (b.hp) {
-    if (b.hp.current !== undefined) data.hp.current = Math.max(0, Math.round(Number(b.hp.current)) || 0);
+    // Current HP stays between 0 and the character's maximum (temporary HP is tracked separately)
+    if (b.hp.current !== undefined) {
+      const max = derive(data).maxHp;
+      data.hp.current = Math.max(0, Math.round(Number(b.hp.current)) || 0);
+      if (max > 0) data.hp.current = Math.min(max, data.hp.current);
+    }
     if (b.hp.temp !== undefined) data.hp.temp = Math.max(0, Number(b.hp.temp) || 0);
   }
   if (b.deathSaves) data.deathSaves = { successes: Math.max(0, Math.min(3, Number(b.deathSaves.successes) || 0)), failures: Math.max(0, Math.min(3, Number(b.deathSaves.failures) || 0)) };

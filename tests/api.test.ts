@@ -496,3 +496,94 @@ test("showing a hidden monster on the map shows it in the turn order too (and hi
   D.s.emit("initiative", { op: "clear" });
   for (const x of [D, S]) x.s.close();
 });
+
+test("monster HP is DM-only: players see when a monster is down, never its numbers; player characters' HP stays visible", async () => {
+  const D = await live(dm), S = await live(sam);
+  D.s.emit("token:add", { name: "Ogre Brute", x: 400, y: 400, hp: 59, maxHp: 59 });
+  await waitFor(() => D.last("map").tokens.some((t: any) => t.name === "Ogre Brute"));
+  const ogreId = D.last("map").tokens.find((t: any) => t.name === "Ogre Brute").id;
+  D.s.emit("token:update", { id: ogreId, hp: 31 });
+  await waitFor(() => D.last("map").tokens.find((t: any) => t.id === ogreId).hp === 31);
+  await pause();
+  const dmOgre = D.last("map").tokens.find((t: any) => t.id === ogreId);
+  assert.equal(dmOgre.maxHp, 59);
+  const pOgre = S.last("map").tokens.find((t: any) => t.id === ogreId);
+  assert.equal(pOgre.hp, null);
+  assert.equal(pOgre.maxHp, null);
+  assert.equal(S.all("map").some((m) => m?.tokens?.some((t: any) => t.id === ogreId && (t.hp === 31 || t.hp === 59 || t.maxHp === 59))), false);
+  // Sam's own character still shows HP to players
+  assert.notEqual(S.last("map").tokens.find((t: any) => t.id === samTokenId).hp, null);
+  // A downed monster shows as down (0) for players
+  D.s.emit("token:update", { id: ogreId, hp: 0 });
+  await waitFor(() => S.last("map").tokens.find((t: any) => t.id === ogreId)?.hp === 0);
+  // Fresh join snapshot too
+  D.s.emit("token:update", { id: ogreId, hp: 12 });
+  await waitFor(() => D.last("map").tokens.find((t: any) => t.id === ogreId).hp === 12);
+  const J = await live(jo);
+  assert.equal(J.last("map").tokens.find((t: any) => t.id === ogreId).hp, null);
+  D.s.emit("token:delete", ogreId);
+  await pause();
+  for (const x of [D, S, J]) x.s.close();
+});
+
+test("session recaps: the players' recap is written without whispers, secret rolls, DM notes or the adventure", async () => {
+  const D = await live(dm), S = await live(sam);
+  S.s.emit("chat", "We kick open the crypt door!");
+  D.s.emit("roll", { expr: "1d20", label: "Ghoul stealth SECRETROLL" });
+  S.s.emit("chat", "/w Jo WHISPERTEXT I'm stealing the gem");
+  D.s.emit("chat", "The door creaks open onto a dusty hall.");
+  await waitFor(() => D.all("chat").length >= 4);
+  for (const x of [D, S]) x.s.close();
+
+  process.env.DATA_DIR = dataDir;
+  process.env.ANTHROPIC_API_KEY ??= "test-key";
+  const ai = await import("../server/ai.ts");
+  const { chatLog } = await import("../server/routes/recaps.ts");
+  const { publicCampaignContext, campaignContext } = await import("../server/helpers.ts");
+  const calls: any[] = [];
+  ai.setAIClientForTests({ beta: { messages: { parse: async (req: any) => {
+    calls.push(req);
+    return { stop_reason: "end_turn", model: "test-model", usage: { input_tokens: 1, output_tokens: 1 }, parsed_output: { title: "T", player_recap: "P", dm_notes: "D" } };
+  } } } });
+  try {
+    const log = chatLog(campaignId, 0, null);
+    const r = await ai.writeSessionRecap(publicCampaignContext(campaignId), campaignContext(campaignId), 1, { publicText: log.publicText, fullText: log.text }, "They bowed to the statue");
+    assert.deepEqual(r, { title: "T", player_recap: "P", dm_notes: "D" });
+    assert.equal(calls.length, 2);
+    const player = calls.find((c) => JSON.stringify(c.messages).includes("player_recap"));
+    const dmCall = calls.find((c) => c !== player);
+    assert.ok(has(player, "crypt door") && has(player, "bowed to the statue"), "players' recap sees the public log and the DM's spoken notes");
+    for (const bad of ["SECRETROLL", "WHISPERTEXT", "lich", "Secret heir", "[private]"]) assert.equal(has(player, bad), false, `players' recap request saw "${bad}"`);
+    assert.ok(has(dmCall, "SECRETROLL") && has(dmCall, "WHISPERTEXT") && has(dmCall, "lich"), "the DM's notes request still sees everything");
+  } finally {
+    ai.setAIClientForTests(null);
+  }
+});
+
+test("current HP never goes above the maximum, on the sheet or on the map", async () => {
+  const max = (await sam.get(`/characters/${charId}`)).data.derived?.maxHp;
+  await sam.patch(`/characters/${charId}/play`, { hp: { current: 999 } });
+  const cur = (await sam.get(`/characters/${charId}`)).data.data.hp.current;
+  assert.ok(cur < 999 && cur > 0, `sheet HP was capped (got ${cur}${max ? `, max ${max}` : ""})`);
+  const D = await live(dm);
+  D.s.emit("token:update", { id: samTokenId, hp: 999 });
+  await pause();
+  assert.equal(D.last("map").tokens.find((t: any) => t.id === samTokenId).hp, cur);
+  D.s.emit("token:add", { name: "Wolf", x: 10, y: 10, hp: 11, maxHp: 11 });
+  await waitFor(() => D.last("map").tokens.some((t: any) => t.name === "Wolf"));
+  const wolf = D.last("map").tokens.find((t: any) => t.name === "Wolf").id;
+  D.s.emit("token:update", { id: wolf, hp: 50 });
+  await pause();
+  assert.equal(D.last("map").tokens.find((t: any) => t.id === wolf).hp, 11);
+  D.s.emit("token:delete", wolf);
+  await pause();
+  D.s.close();
+});
+
+test("switching a campaign's rules switches its characters too", async () => {
+  assert.equal((await sam.patch(`/campaigns/${campaignId}`, { rulesVersion: "2024" })).status, 403);
+  await dm.patch(`/campaigns/${campaignId}`, { rulesVersion: "2024" });
+  assert.equal((await sam.get(`/characters/${charId}`)).data.data.rulesVersion, "2024");
+  await dm.patch(`/campaigns/${campaignId}`, { rulesVersion: "2014" });
+  assert.equal((await sam.get(`/characters/${charId}`)).data.data.rulesVersion, "2014");
+});

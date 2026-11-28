@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { all, one, parseJSON, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
-import { campaignAccess, campaignAccessById, campaignContext, HttpError, num } from "../helpers.ts";
+import { campaignAccess, campaignAccessById, campaignContext, HttpError, num, publicCampaignContext } from "../helpers.ts";
 import { notify, postChat } from "../realtime.ts";
 import { aiEnabled, writeSessionRecap } from "../ai.ts";
 
@@ -22,7 +22,7 @@ recapRoutes.get("/campaigns/:id/recaps", (req, res) => {
 });
 
 /** Turn chat into a readable log for the AI. */
-function chatLog(campaignId: number, fromId: number, hours: number | null) {
+export function chatLog(campaignId: number, fromId: number, hours: number | null) {
   const rows = all(
     `SELECT c.*, u.display_name AS name FROM chat c LEFT JOIN users u ON u.id = c.user_id
      WHERE c.campaign_id = ? AND c.id > ? ${hours ? "AND c.created_at >= datetime('now', ?)" : ""} ORDER BY c.id`,
@@ -37,9 +37,11 @@ function chatLog(campaignId: number, fromId: number, hours: number | null) {
     if (r.kind === "share") return `${time} ${priv}DM shared ${b.title ? `"${b.title}"` : "a handout"}: ${String(b.text).slice(0, 600)}`;
     return `${time} ${priv}${who}: ${String(b.text ?? "").slice(0, 500)}`;
   });
-  let text = lines.join("\n");
-  if (text.length > 60000) text = "(earlier part trimmed)\n" + text.slice(-60000);
-  return { text, lastId: rows.length ? rows[rows.length - 1].id : fromId, count: rows.length };
+  const trim = (t: string) => (t.length > 60000 ? "(earlier part trimmed)\n" + t.slice(-60000) : t);
+  const text = trim(lines.join("\n"));
+  // The players' recap only ever sees lines everyone could see (no whispers, secret or DM rolls)
+  const publicText = trim(lines.filter((_l, i) => rows[i].whisper_to == null).join("\n"));
+  return { text, publicText, lastId: rows.length ? rows[rows.length - 1].id : fromId, count: rows.length };
 }
 
 recapRoutes.post("/campaigns/:id/recaps", async (req, res) => {
@@ -50,7 +52,7 @@ recapRoutes.post("/campaigns/:id/recaps", async (req, res) => {
   const hours = range === "6h" ? 6 : range === "24h" ? 24 : range === "7d" ? 168 : null;
   const log = chatLog(id, range === "since-last" ? last : 0, hours);
   if (log.count < 3 && !String(req.body?.extra ?? "").trim()) throw new HttpError(400, "There isn't enough chat in that time to recap. Pick a longer range or add your own notes.");
-  const recap = await writeSessionRecap(campaignContext(id), req.user!.id, log.text || "(no chat)", String(req.body?.extra ?? "").slice(0, 4000));
+  const recap = await writeSessionRecap(publicCampaignContext(id), campaignContext(id), req.user!.id, { publicText: log.publicText, fullText: log.text || "(no chat)" }, String(req.body?.extra ?? "").slice(0, 4000));
   const r = run("INSERT INTO session_recaps (campaign_id, title, player_recap, dm_notes, last_chat_id) VALUES (?,?,?,?,?)", id, recap.title.slice(0, 200), recap.player_recap, recap.dm_notes, log.lastId);
   res.json({ id: Number(r.lastInsertRowid) });
 });

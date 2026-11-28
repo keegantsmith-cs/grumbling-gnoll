@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { all, one, run } from "../db.ts";
+import { all, one, parseJSON, run } from "../db.ts";
 import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, imageUpload } from "../helpers.ts";
 import { addMonsterTokens, averageHp, broadcastMap, dropFromCampaign, monsterMeta, notify, sizeToCells } from "../realtime.ts";
@@ -63,7 +63,17 @@ campaignRoutes.patch("/campaigns/:id", (req, res) => {
   const b = req.body ?? {};
   if (typeof b.name === "string" && b.name.trim()) run("UPDATE campaigns SET name = ? WHERE id = ?", b.name.trim().slice(0, 80), id);
   if (typeof b.description === "string") run("UPDATE campaigns SET description = ? WHERE id = ?", b.description.slice(0, 2000), id);
-  if (b.rulesVersion === "2014" || b.rulesVersion === "2024") run("UPDATE campaigns SET rules_version = ? WHERE id = ?", b.rulesVersion, id);
+  if ((b.rulesVersion === "2014" || b.rulesVersion === "2024") && b.rulesVersion !== one("SELECT rules_version FROM campaigns WHERE id = ?", id)?.rules_version) {
+    run("UPDATE campaigns SET rules_version = ? WHERE id = ?", b.rulesVersion, id);
+    // Everyone's characters (and sheets waiting for approval) switch to the campaign's new rules too
+    for (const ch of all("SELECT id, data FROM characters WHERE campaign_id = ?", id)) {
+      run("UPDATE characters SET data = ? WHERE id = ?", JSON.stringify({ ...parseJSON<Record<string, unknown>>(ch.data, {}), rulesVersion: b.rulesVersion }), ch.id);
+    }
+    for (const ch of all("SELECT cc.id, cc.proposed FROM character_changes cc JOIN characters c ON c.id = cc.character_id WHERE c.campaign_id = ? AND cc.status = 'pending'", id)) {
+      run("UPDATE character_changes SET proposed = ? WHERE id = ?", JSON.stringify({ ...parseJSON<Record<string, unknown>>(ch.proposed, {}), rulesVersion: b.rulesVersion }), ch.id);
+    }
+    notify(id, "characters");
+  }
   if (typeof b.dmNotes === "string") run("UPDATE campaigns SET dm_notes = ? WHERE id = ?", b.dmNotes.slice(0, 200000), id);
   if (b.discord) {
     const wh = String(b.discord.webhook ?? "").trim(), dmWh = String(b.discord.dmWebhook ?? "").trim();

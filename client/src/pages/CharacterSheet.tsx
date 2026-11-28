@@ -137,7 +137,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
                   <input type="number" value={d.hp.max ?? ""} style={{ width: 90 }} onChange={(e) => upd({ hp: { ...d.hp, max: e.target.value === "" ? null : Number(e.target.value) } })} /></label>
               </div>
               <div className="row">
-                <label>AC <span className="muted">(blank = 10 + Dex)</span><input type="number" value={d.ac ?? ""} style={{ width: 80 }} onChange={(e) => upd({ ac: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+                <label>AC <span className="muted">(blank = auto {derive({ ...d, ac: null }).ac}{(() => { const src = derive({ ...d, ac: null }).acSource; return src ? `: ${src}` : ""; })()})</span><input type="number" value={d.ac ?? ""} style={{ width: 80 }} onChange={(e) => upd({ ac: e.target.value === "" ? null : Number(e.target.value) })} /></label>
                 <label>Speed<input type="number" value={d.speed} style={{ width: 70 }} onChange={(e) => upd({ speed: Number(e.target.value) })} /></label>
                 <label>Extra initiative<input type="number" value={d.initiativeBonus} style={{ width: 70 }} onChange={(e) => upd({ initiativeBonus: Number(e.target.value) })} /></label>
               </div>
@@ -359,7 +359,9 @@ function SpellsEditor({ d, dv, upd, play }: { d: CharacterData; dv: ReturnType<t
   return (
     <div className="card">
       <h3>Spells</h3>
-      {dv.spellAbility && <p className="muted">Spell save DC <b>{dv.spellSaveDC}</b> · Spell attack <b>{fmtMod(dv.spellAttack ?? 0)}</b> · {ABILITY_NAMES[dv.spellAbility as Ability]}</p>}
+      {dv.spellAbility && (new Set(dv.casters.map((x) => x.ability)).size > 1 && d.overrides.spellSaveDC == null && d.overrides.spellAttack == null
+        ? <p className="muted">{dv.casters.map((x) => <span key={x.className} style={{ marginRight: 12 }}>{x.className}: spell save DC <b>{x.dc}</b> · attack <b>{fmtMod(x.attack)}</b> · {ABILITY_NAMES[x.ability]}</span>)}</p>
+        : <p className="muted">Spell save DC <b>{dv.spellSaveDC}</b> · Spell attack <b>{fmtMod(dv.spellAttack ?? 0)}</b> · {ABILITY_NAMES[dv.spellAbility as Ability]}</p>)}
       {dv.spellSlots.map((n, lvl) => n > 0 && (
         <div key={lvl} className="row" style={{ marginBottom: 2 }}>
           <span style={{ width: 90 }}>Level {lvl + 1}</span>

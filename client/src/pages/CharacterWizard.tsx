@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import { useStatus } from "../hooks";
 import {
-  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, blankCharacter, classInfo, derive, fmtMod, mod,
+  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, blankCharacter, classInfo, derive, fmtMod, isArmorOrShield, mod,
   type Ability, type CharacterData, type RulesVersion,
 } from "../../../shared/character";
 import { ALIGNMENTS, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
@@ -129,7 +129,7 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
       skillProficiencies: [...new Set([...bgSkills, ...chosenClassSkills])],
       hp: { max: rolledHp ? hpTotal : null, current: hpTotal, temp: 0 },
       speed,
-      inventory: items.map((n) => ({ name: n, qty: 1, weight: 0, equipped: false, attuned: false, notes: "" })),
+      inventory: items.map((n) => ({ name: n, qty: 1, weight: 0, equipped: isArmorOrShield(n), attuned: false, notes: "" })),
       currency: { ...d.currency, gp: goldMode === "roll" && goldRoll ? goldRoll.value : gold },
       personality, backstory,
       features: [
