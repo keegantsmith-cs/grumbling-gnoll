@@ -111,9 +111,9 @@ function SessionCard({ campaign, reload }: { campaign: Campaign; reload: () => v
   const [weekly, setWeekly] = useState(campaign.sessionWeekly);
   const save = async (clear = false) => {
     try {
-      await api.post(`/campaigns/${campaign.id}/session`, clear ? { at: null } : { at: at ? new Date(at).toISOString() : null, note, weekly });
+      const r = await api.post<{ announced: boolean | null }>(`/campaigns/${campaign.id}/session`, clear ? { at: null } : { at: at ? new Date(at).toISOString() : null, note, weekly });
       if (clear) { setAt(""); setNote(""); setWeekly(false); }
-      toast(clear ? "Next session cleared" : campaign.discord?.webhook ? "Saved and announced in Discord" : "Saved");
+      toast(clear ? "Next session cleared" : r?.announced === true ? "Saved and announced in Discord" : r?.announced === false ? "Saved, but Discord couldn't be reached" : "Saved");
       reload();
     } catch (e) { toast((e as Error).message); }
   };

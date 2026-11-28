@@ -53,6 +53,7 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
       <DiceTray />
       <div className="tabs">
         <span className="brand" style={{ alignSelf: "center", marginRight: 12, whiteSpace: "nowrap" }}>{campaign.name}</span>
+        <span className="tabs-break" aria-hidden="true" />
         {tabs.map(([k, label, count]) => (
           <button key={k} className={tab === k ? "active" : ""} aria-current={tab === k ? "page" : undefined} onClick={() => go(`c/${id}/${k}`)}>
             <span className="tab-icon" aria-hidden="true">{label.split(" ")[0]} </span>{label.slice(label.indexOf(" ") + 1)}
@@ -60,7 +61,7 @@ export function CampaignPage({ id, tab, sub }: { id: number; tab: string; sub?: 
           </button>
         ))}
         <VoiceButton campaign={campaign} />
-        <span style={{ marginLeft: 12, alignSelf: "center", whiteSpace: "nowrap" }} className="muted" title={live.presence.map((p) => p.name).join(", ")}>
+        <span style={{ marginLeft: 12, alignSelf: "center", whiteSpace: "nowrap" }} className="muted online-badge" title={live.presence.map((p) => p.name).join(", ")}>
           {live.connected ? `🟢 ${live.presence.length} online` : "🔴 reconnecting..."}
         </span>
       </div>

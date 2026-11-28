@@ -409,8 +409,11 @@ export function derive(c: CharacterData): Derived {
   };
 }
 
+/** Class names for a summary line. The total level is shown separately ("Level 3 ..."), so a single-class
+ *  character shows no number here; multiclass characters show each class's own level. */
 export function classSummary(c: CharacterData) {
-  return c.classes.map((cl) => `${cl.name}${cl.subclass ? ` (${cl.subclass})` : ""} ${cl.level}`).join(" / ");
+  const multi = c.classes.length > 1;
+  return c.classes.map((cl) => `${cl.name}${cl.subclass ? ` (${cl.subclass})` : ""}${multi ? ` ${cl.level}` : ""}`).join(" / ");
 }
 
 /** A readable list of what changed between two versions, for the DM approval screen. */

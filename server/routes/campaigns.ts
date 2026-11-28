@@ -154,7 +154,7 @@ campaignRoutes.get("/campaigns/:id/chat/export", (req, res) => {
 });
 
 // ---- next session ----
-campaignRoutes.post("/campaigns/:id/session", (req, res) => {
+campaignRoutes.post("/campaigns/:id/session", async (req, res) => {
   const { id } = campaignAccess(req, true);
   const b = req.body ?? {};
   let at: string | null = null;
@@ -170,9 +170,11 @@ campaignRoutes.post("/campaigns/:id/session", (req, res) => {
     b.weekly ? 1 : 0,
     id,
   );
-  if (at && b.announce !== false) discordSessionAnnounce(id);
+  const hasWebhook = !!one("SELECT discord_webhook FROM campaigns WHERE id = ?", id)?.discord_webhook;
+  let announced: boolean | null = null; // null = nothing was sent
+  if (at && b.announce !== false && hasWebhook) announced = await discordSessionAnnounce(id);
   notify(id, "campaign");
-  res.json({ ok: true });
+  res.json({ ok: true, announced });
 });
 
 // ---- test the Discord links ----

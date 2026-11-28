@@ -16,12 +16,17 @@ interface Payload { content?: string; embeds?: Embed[]; pingEveryone?: boolean }
 // One queue per webhook so messages arrive in order and respect Discord's rate limits.
 const queues = new Map<string, Promise<void>>();
 
-export function sendWebhook(url: string, payload: Payload): Promise<void> {
-  if (!url) return Promise.resolve();
+/** Sends a message and says whether Discord accepted it (never throws). */
+export function sendWebhookChecked(url: string, payload: Payload): Promise<boolean> {
+  if (!url) return Promise.resolve(false);
   const prev = queues.get(url) ?? Promise.resolve();
-  const next = prev.then(() => deliver(url, payload)).catch((e) => console.error("Discord webhook failed:", e.message));
-  queues.set(url, next);
-  return next;
+  const result = prev.then(() => deliver(url, payload)).then(() => true, (e) => { console.error("Discord webhook failed:", e.message); return false; });
+  queues.set(url, result.then(() => undefined));
+  return result;
+}
+
+export async function sendWebhook(url: string, payload: Payload): Promise<void> {
+  await sendWebhookChecked(url, payload);
 }
 
 async function deliver(url: string, payload: Payload, attempt = 0): Promise<void> {
@@ -107,10 +112,11 @@ export function discordAlertDM(campaignId: number, title: string, description: s
 
 const ts = (iso: string, style = "F") => `<t:${Math.floor(new Date(iso).getTime() / 1000)}:${style}>`;
 
-export function discordSessionAnnounce(campaignId: number) {
+/** Returns true only if Discord accepted the announcement. */
+export function discordSessionAnnounce(campaignId: number): Promise<boolean> {
   const c = one("SELECT name, discord_webhook, next_session_at, session_note, session_weekly FROM campaigns WHERE id = ?", campaignId);
-  if (!c?.discord_webhook || !c.next_session_at) return;
-  void sendWebhook(c.discord_webhook, {
+  if (!c?.discord_webhook || !c.next_session_at) return Promise.resolve(false);
+  return sendWebhookChecked(c.discord_webhook, {
     embeds: [{
       color: GOLD,
       title: `📅 Next session of ${c.name}`,

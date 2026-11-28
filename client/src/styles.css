@@ -93,6 +93,7 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 12
 .narrow { width: 100%; max-width: 380px; }
 
 .tabs { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); background: #14110d; overflow-x: auto; }
+.tabs > .tabs-break { display: none; }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 10px 11px; color: var(--muted); }
 .tabs button.active { color: var(--gold); border-bottom-color: var(--gold); }
 .badge { display: inline-block; background: var(--red); color: #fff; border-radius: 10px; font-size: 11px; padding: 0 6px; margin-left: 4px; }
@@ -169,6 +170,9 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .stat-box[role="button"] .v { color: var(--gold); }
 .stat-box[role="button"]:hover { border-color: var(--gold); }
 .skill-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.skill-row input[type="checkbox"] { width: 16px; height: 16px; margin: 0 7px; flex: none; }
+.skill-head { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted, #9a8f7e); padding-bottom: 0; }
+.skill-head span { width: 30px; text-align: center; flex: none; }
 .skill-row .val { width: 34px; text-align: right; font-weight: 600; cursor: pointer; color: var(--gold); border-radius: 4px; }
 .skill-row .val:hover, .ability .modv:hover { color: #fff; text-decoration: underline; }
 .spell-row { gap: 6px; }
@@ -228,7 +232,10 @@ table.list th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .topbar { padding: 8px 12px; }
   .topbar .brand { font-size: 16px; }
   .tabs { padding: 0 8px; }
-  .tabs > .brand { flex-basis: 100%; padding-top: 8px; }
+  /* campaign name and "online" share the first line; the tab buttons wrap below */
+  .tabs > .brand { order: -2; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding-top: 8px; margin-right: 0 !important; }
+  .tabs > .tabs-break { display: block; flex-basis: 100%; height: 0; order: 0; }
+  .tabs > .online-badge { order: -1; margin-left: auto !important; padding-top: 8px; font-size: 13px; }
   .sheet-head h1 { font-size: 22px; }
 }
 

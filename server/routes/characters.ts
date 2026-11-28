@@ -554,7 +554,8 @@ characterRoutes.delete("/characters/:id", (req, res) => {
 characterRoutes.get("/campaigns/:id/approvals", (req, res) => {
   const { id } = campaignAccess(req, true);
   const rows = all(
-    `SELECT cc.*, c.data AS current, c.status AS char_status, c.name AS char_name, u.display_name AS submitter
+    `SELECT cc.*, c.data AS current, c.status AS char_status, c.name AS char_name, u.display_name AS submitter,
+       (SELECT p.proposed FROM character_changes p WHERE p.character_id = cc.character_id AND p.id < cc.id AND p.status != 'pending' ORDER BY p.id DESC LIMIT 1) AS earlier
      FROM character_changes cc JOIN characters c ON c.id = cc.character_id JOIN users u ON u.id = cc.submitted_by
      WHERE c.campaign_id = ? AND cc.status = 'pending' ORDER BY cc.created_at`,
     id,
@@ -563,7 +564,10 @@ characterRoutes.get("/campaigns/:id/approvals", (req, res) => {
   res.json(
     rows.map((r) => {
       const proposed = normalizeCharacter(parseJSON(r.proposed, {}), rules);
-      const current = r.char_status === "approved" ? normalizeCharacter(parseJSON(r.current, {}), rules) : null;
+      // An approved character is compared with its official sheet. One that was never approved (a new character the DM
+      // sent back, then the player resubmitted) is compared with the version submitted before, so the DM sees what changed.
+      const base = r.char_status === "approved" ? r.current : r.earlier;
+      const current = base ? normalizeCharacter(parseJSON(base, {}), rules) : null;
       return {
         id: r.id,
         characterId: r.character_id,

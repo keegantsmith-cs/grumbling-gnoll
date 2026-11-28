@@ -26,11 +26,55 @@ interface SocketData {
 
 const room = (campaignId: number) => `campaign:${campaignId}`;
 
+/** Is this point in a revealed (unfogged) area? The map starts fully fogged; shapes apply in order, the last one covering the point wins. */
+export function pointRevealed(fog: Row[], x: number, y: number) {
+  let revealed = false;
+  for (const f of fog) {
+    let inside = false;
+    if (f.kind === "all") inside = true;
+    else if (f.kind === "rect") inside = x >= Math.min(f.x, f.x + f.w) && x <= Math.max(f.x, f.x + f.w) && y >= Math.min(f.y, f.y + f.h) && y <= Math.max(f.y, f.y + f.h);
+    else if (f.kind === "poly") {
+      // A painted brush stroke: everything within the brush radius of the line
+      const pts: number[] = Array.isArray(f.points) ? f.points : [];
+      for (let i = 0; i + 1 < pts.length && !inside; i += 2) {
+        const ax = pts[i], ay = pts[i + 1];
+        const bx = pts[i + 2] ?? ax, by = pts[i + 3] ?? ay;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        const u = len2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2)) : 0;
+        inside = Math.hypot(x - (ax + u * dx), y - (ay + u * dy)) <= f.r;
+      }
+    } else inside = Math.hypot(x - f.x, y - f.y) <= f.r;
+    if (inside) revealed = f.mode === "reveal";
+  }
+  return revealed;
+}
+
+/** Fog settings of a map, read once so several tokens can be checked against them. */
+function fogOf(mapId: number) {
+  const m = one("SELECT fog_enabled, fog FROM maps WHERE id = ?", mapId);
+  return { enabled: !!m?.fog_enabled, shapes: parseJSON<Row[]>(m?.fog, []) };
+}
+
+/**
+ * Should this person's browser be told about this token at all? The DM sees everything.
+ * Players never get hidden tokens, and (with fog of war on) nothing standing in fog,
+ * except player characters and tokens handed to players, which they always get.
+ */
+function tokenVisible(t: Row, isDM: boolean, fog: { enabled: boolean; shapes: Row[] }) {
+  if (isDM) return true;
+  if (t.hidden) return false;
+  if (!fog.enabled) return true;
+  if (t.character_id || t.controlled_by) return true;
+  return pointRevealed(fog.shapes, t.x, t.y);
+}
+
 export function mapPayload(mapId: number | null, isDM: boolean) {
   if (!mapId) return null;
   const m = one("SELECT * FROM maps WHERE id = ?", mapId);
   if (!m) return null;
-  const tokens = all("SELECT * FROM tokens WHERE map_id = ? ORDER BY id", mapId).filter((t) => isDM || !t.hidden);
+  const fogState = { enabled: !!m.fog_enabled, shapes: parseJSON<Row[]>(m.fog, []) };
+  const tokens = all("SELECT * FROM tokens WHERE map_id = ? ORDER BY id", mapId).filter((t) => tokenVisible(t, isDM, fogState));
   let generated = parseJSON<any>(m.generated, null);
   if (generated && !isDM) {
     // Players never see secret doors on generated maps: draw them as walls.
@@ -273,9 +317,18 @@ export function initRealtime(server: HttpServer) {
       const t = tokenOnActiveMap(Number(p.id), d.campaignId);
       if (!t || !canMoveToken(t, d)) return;
       run("UPDATE tokens SET x = ?, y = ? WHERE id = ?", Number(p.x), Number(p.y), t.id);
-      if (t.hidden) {
-        eachSocket(d.campaignId, (s, sd) => sd.isDM && s.emit("token:moved", { id: t.id, x: Number(p.x), y: Number(p.y) }));
-      } else io.to(room(d.campaignId)).emit("token:moved", { id: t.id, x: Number(p.x), y: Number(p.y) });
+      const moved = { id: t.id, x: Number(p.x), y: Number(p.y) };
+      const fog = fogOf(t.map_id);
+      const after = { ...t, x: moved.x, y: moved.y };
+      const activeMap = one("SELECT active_map_id FROM campaigns WHERE id = ?", d.campaignId)?.active_map_id;
+      eachSocket(d.campaignId, (s, sd) => {
+        if (sd.isDM) return void s.emit("token:moved", moved);
+        const before = tokenVisible(t, false, fog), now = tokenVisible(after, false, fog);
+        if (before && now) s.emit("token:moved", moved);
+        // Walked out of the fog: this player's browser has never heard of the token, so send the fresh map.
+        // Walked into the fog: send the fresh map so the token disappears.
+        else if (before !== now && t.map_id === activeMap) s.emit("map", mapPayload(t.map_id, false));
+      });
     });
 
     socket.on("token:add", (p: Row) => {
@@ -417,7 +470,8 @@ export function initRealtime(server: HttpServer) {
         if (fog.length > 3000) fog = fog.slice(-3000);
       }
       run("UPDATE maps SET fog = ? WHERE id = ?", JSON.stringify(fog), c.active_map_id);
-      io.to(room(d.campaignId)).emit("fog", fog);
+      // Tokens standing in newly revealed or newly covered areas appear or disappear for players, so everyone gets a fresh map
+      broadcastMap(d.campaignId);
     });
 
     // ---- initiative ----

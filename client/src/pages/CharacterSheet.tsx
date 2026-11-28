@@ -161,7 +161,11 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
             </div>
             <div className="card">
               <h3>Skills</h3>
-              <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>First box: proficient · second box (gold): expertise</p>
+              <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>Prof: proficient · Exp (gold): expertise</p>
+              <div className="skill-row skill-head" aria-hidden="true">
+                <span title="Proficient">Prof</span>
+                <span title="Expertise" style={{ color: "#e3b866" }}>Exp</span>
+              </div>
               {SKILLS.map((s) => (
                 <div key={s.key} className="skill-row">
                   <input type="checkbox" aria-label={`Proficient in ${s.name}`} title="Proficient" checked={d.skillProficiencies.includes(s.key)} onChange={(e) => upd({ skillProficiencies: toggle(d.skillProficiencies, s.key, e.target.checked) })} />

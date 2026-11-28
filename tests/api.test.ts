@@ -587,3 +587,89 @@ test("switching a campaign's rules switches its characters too", async () => {
   await dm.patch(`/campaigns/${campaignId}`, { rulesVersion: "2014" });
   assert.equal((await sam.get(`/characters/${charId}`)).data.data.rulesVersion, "2014");
 });
+
+// ---------------------------------------------------------------------------
+// Resubmitted characters show what changed since the version the DM sent back
+// ---------------------------------------------------------------------------
+test("a resubmitted character lists what changed since the version the DM sent back", async () => {
+  const id = (await sam.post("/characters", { campaignId, data: { name: "Resub", species: "Human" } })).data.id;
+  const first = (await dm.get(`/campaigns/${campaignId}/approvals`)).data.find((a: any) => a.characterId === id);
+  assert.deepEqual(first.changes, ["New character"]);
+  await dm.post(`/changes/${first.id}/reject`, { comment: "Please pick a real species" });
+  const sheet = (await sam.get(`/characters/${id}`)).data;
+  await sam.put(`/characters/${id}`, { data: { ...sheet.data, species: "Dwarf", speed: 25 }, note: "fixed" });
+  const again = (await dm.get(`/campaigns/${campaignId}/approvals`)).data.find((a: any) => a.characterId === id);
+  assert.ok(!again.changes.includes("New character"));
+  assert.ok(again.changes.length >= 2, `expected a list of changes, got ${JSON.stringify(again.changes)}`);
+  assert.ok(again.changes.join("|").includes("Dwarf"));
+  await dm.post(`/changes/${again.id}/approve`, {});
+});
+
+// ---------------------------------------------------------------------------
+// Fog of war: players are only told about tokens standing in revealed areas
+// ---------------------------------------------------------------------------
+test("fog of war: players never receive tokens standing in fog (server-side), the DM gets everything", async () => {
+  const fogMap = (await dm.post(`/campaigns/${campaignId}/maps/generate`, { cols: 30, rows: 24, seed: 3, rooms: 8, theme: "stone", name: "Fog Test" })).data.id;
+  assert.equal((await dm.post(`/campaigns/${campaignId}/active-map`, { mapId: fogMap })).status, 200);
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  const names = (L: { last: (n: string) => any }) => (L.last("map")?.tokens ?? []).map((t: any) => t.name).sort();
+  const idOf = (L: { last: (n: string) => any }, name: string) => L.last("map").tokens.find((t: any) => t.name === name)?.id;
+
+  D.s.emit("token:add", { name: "Fogged Orc", x: 100, y: 100 });
+  D.s.emit("token:add", { name: "Open Orc", x: 500, y: 500 });
+  S.s.emit("token:add", { name: "Mirabel", x: 100, y: 120, characterId: charId }); // Sam's own character, standing in fog
+  await waitFor(() => names(D).length === 3);
+  const fogged = idOf(D, "Fogged Orc"), open = idOf(D, "Open Orc");
+
+  // Nothing revealed yet: the fogged orc, the open orc and every other monster are invisible to players, but their own character is not
+  await waitFor(() => has(S.last("map"), "Mirabel"));
+  assert.deepEqual(names(S), ["Mirabel"]);
+  assert.deepEqual(names(J), ["Mirabel"], "other players' characters are always sent");
+  assert.deepEqual(names(D), ["Fogged Orc", "Mirabel", "Open Orc"]);
+
+  // Reveal the area around the open orc
+  D.s.emit("fog", { op: "add", shape: { mode: "reveal", kind: "circle", x: 500, y: 500, r: 100 } });
+  await waitFor(() => names(S).includes("Open Orc") && names(J).includes("Open Orc"));
+  assert.deepEqual(names(S), ["Mirabel", "Open Orc"]);
+  assert.equal(has(S.last("map"), "Fogged Orc") || has(J.last("map"), "Fogged Orc"), false);
+
+  // A player who joins later gets the same filtered map
+  const late = await live(jo);
+  assert.deepEqual(names(late), ["Mirabel", "Open Orc"]);
+  late.s.close();
+
+  // The open orc walks into the fog: it disappears for players (and is never told about again)
+  D.s.emit("token:move", { id: open, x: 100, y: 300 });
+  await waitFor(() => !names(S).includes("Open Orc") && !names(J).includes("Open Orc"));
+  const eventsBefore = S.events.length;
+  D.s.emit("token:move", { id: open, x: 110, y: 310 });
+  await pause();
+  assert.equal(has(S.events.slice(eventsBefore), "Open Orc") || S.events.slice(eventsBefore).some((e) => e.name === "token:moved" && e.data.id === open), false);
+
+  // The fogged orc walks out of the fog into the revealed circle: it appears
+  D.s.emit("token:move", { id: fogged, x: 510, y: 520 });
+  await waitFor(() => names(S).includes("Fogged Orc") && names(J).includes("Fogged Orc"));
+  // ...and while it stays visible, ordinary live moves reach players
+  D.s.emit("token:move", { id: fogged, x: 520, y: 530 });
+  await waitFor(() => S.all("token:moved").some((m: any) => m.id === fogged && m.x === 520));
+  // The DM watched all of it, including the moves in the fog
+  assert.ok(D.all("token:moved").some((m: any) => m.id === open && m.x === 110));
+
+  // A player's own token is always sent, even when they walk it deep into fog
+  S.s.emit("token:move", { id: idOf(D, "Mirabel"), x: 900, y: 700 });
+  await waitFor(() => D.last("map") && D.all("token:moved").some((m: any) => m.x === 900));
+  assert.ok(names(S).includes("Mirabel") && names(J).includes("Mirabel"));
+  await waitFor(() => J.all("token:moved").some((m: any) => m.x === 900));
+
+  // Covering the area with fog again hides the orc from players on the spot
+  D.s.emit("fog", { op: "add", shape: { mode: "hide", kind: "rect", x: 400, y: 400, w: 200, h: 200 } });
+  await waitFor(() => !names(S).includes("Fogged Orc"));
+
+  // With fog turned off for this map, fog hides nothing (hidden tokens stay hidden)
+  D.s.emit("token:update", { id: open, hidden: true });
+  assert.equal((await dm.patch(`/maps/${fogMap}`, { fogEnabled: false })).status, 200);
+  await waitFor(() => names(S).includes("Fogged Orc"));
+  assert.deepEqual(names(S), ["Fogged Orc", "Mirabel"]);
+  assert.deepEqual(names(D), ["Fogged Orc", "Mirabel", "Open Orc"]);
+  for (const L of [D, S, J]) L.s.close();
+});
