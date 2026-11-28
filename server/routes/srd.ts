@@ -19,6 +19,12 @@ export function srdMonster(name: string) {
   return srd().monsters.find((m) => m.name.toLowerCase() === name.toLowerCase()) ?? null;
 }
 
+/** An SRD spell by name, ignoring case and a trailing "(ritual)". */
+export function srdSpell(name: string) {
+  const n = name.toLowerCase().replace(/\s*\(.*?\)\s*$/, "").trim();
+  return srd().spells.find((s) => s.name.toLowerCase() === n) ?? null;
+}
+
 export const srdRoutes = Router();
 srdRoutes.use(requireUser);
 

@@ -4,6 +4,7 @@ import { requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError, imageUpload } from "../helpers.ts";
 import { addMonsterTokens, averageHp, broadcastMap, dropFromCampaign, monsterMeta, notify, sizeToCells } from "../realtime.ts";
 import { srdMonster } from "./srd.ts";
+import { monsterCombatData } from "../../shared/combat.ts";
 import { aiEnabled, condenseNotes, generateNpcs } from "../ai.ts";
 import { discordAlertDM, discordMap, discordSessionAnnounce, sendWebhook, validWebhook } from "../discord.ts";
 
@@ -213,7 +214,7 @@ campaignRoutes.post("/campaigns/:id/table/monsters", (req, res) => {
     const n = addMonsterTokens(id, req.user!.id, {
       name: String(b.name || m.name), count: Number(b.count) || 1, hitPoints: hp, hitDice: m.hit_dice, rollHp: !!b.rollHp,
       size: sizeToCells(m.size), hidden: !!b.hidden, initiative: b.initiative ?? "each", dexMod: Math.floor(((Number(m.dex) || 10) - 10) / 2),
-      x: b.x != null ? Number(b.x) : undefined, y: b.y != null ? Number(b.y) : undefined, color: b.color, meta: monsterMeta(m),
+      x: b.x != null ? Number(b.x) : undefined, y: b.y != null ? Number(b.y) : undefined, color: b.color, meta: monsterMeta(m), combat: monsterCombatData(m),
     });
     res.json({ added: n });
   } catch (e) {
@@ -299,7 +300,7 @@ campaignRoutes.post("/campaigns/:id/encounters/place", (req, res) => {
     added += addMonsterTokens(id, req.user!.id, {
       name: em.name, count: em.count, hitPoints: Number(m.hit_points) || averageHp(m.hit_dice, 10), hitDice: m.hit_dice, rollHp: !!b.rollHp,
       size, hidden: !!b.hidden, initiative: b.initiative ?? "each", dexMod: Math.floor(((Number(m.dex) || 10) - 10) / 2),
-      x: b.x != null ? Number(b.x) : undefined, y, meta: monsterMeta(m),
+      x: b.x != null ? Number(b.x) : undefined, y, meta: monsterMeta(m), combat: monsterCombatData(m),
     });
     y += g * Math.max(1, size) + g * 0.5;
   }
@@ -354,7 +355,7 @@ campaignRoutes.post("/campaigns/:id/table/npcs", async (req, res) => {
     const sb = n.statblock as Record<string, any>;
     addMonsterTokens(id, req.user!.id, {
       name: n.name, count: 1, hitPoints: Number(sb.hit_points) || averageHp(sb.hit_dice, 8), hitDice: sb.hit_dice,
-      size: sizeToCells(sb.size), hidden: !!b.hidden, initiative: "none", color: "#2f7d6d", meta: monsterMeta(sb),
+      size: sizeToCells(sb.size), hidden: !!b.hidden, initiative: "none", color: "#2f7d6d", meta: monsterMeta(sb), combat: monsterCombatData(sb),
       x: b.x != null ? Number(b.x) + (i % 3) * g : undefined, y: b.y != null ? Number(b.y) + Math.floor(i / 3) * g : undefined,
     });
   });

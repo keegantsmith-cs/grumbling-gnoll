@@ -6,6 +6,9 @@ import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
 import { derive, normalizeCharacter } from "../shared/character.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
+import { buildActor, controlsToken, publicHealth } from "./combat.ts";
+import { STANDARD_OPTIONS } from "../shared/combat.ts";
+import type { MonsterCombat } from "../shared/combat.ts";
 
 let io: Server;
 
@@ -121,8 +124,10 @@ function tokenOut(t: Row, isDM: boolean) {
     hp: hideHp ? (t.hp != null && t.hp <= 0 ? 0 : null) : t.hp,
     maxHp: hideHp ? null : t.max_hp,
     conditions: t.conditions,
+    ...publicHealth(t, isDM),
     rings: parseJSON(t.rings, []),
-    meta: parseJSON(t.meta, {}),
+    // A monster's movement and attack names come from its stat block: only the DM gets them
+    meta: hideHp ? {} : parseJSON(t.meta, {}),
   };
 }
 
@@ -304,6 +309,26 @@ export function initRealtime(server: HttpServer) {
       // The DM's rolls stay behind the screen unless the DM chooses to show one
       const whisper = d.isDM ? (p.public ? null : d.user.id) : p.secret ? dmIdOf(d.campaignId) : null;
       doRoll(d.campaignId, d.user.id, p.expr, String(p.label ?? "").slice(0, 100), whisper, socket);
+    });
+
+    // ---- combat: the acting creature's attacks and numbers (only for the DM or whoever controls the token) ----
+    socket.on("combat:actor", (p: { tokenId: number }, ack?: (r: unknown) => void) => {
+      if (typeof ack !== "function") return;
+      if (!d.campaignId) return ack({ error: "Not in a campaign" });
+      const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
+      if (!t) return ack({ error: "That token isn't on the map any more" });
+      if (!controlsToken(t, d.user.id, !!d.isDM)) return ack({ error: "That isn't your token" });
+      ack({ actor: buildActor(t) });
+    });
+
+    // "Dash", "Dodge"... just announced in chat so everyone at the table knows what was chosen
+    socket.on("combat:do", (p: { tokenId: number; key: string }) => {
+      if (!d.campaignId) return;
+      const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
+      const opt = STANDARD_OPTIONS.find((o) => o.key === p?.key);
+      if (!t || !opt || !controlsToken(t, d.user.id, !!d.isDM)) return;
+      // A hidden monster doing something stays between you and the DM
+      postChat(d.campaignId, d.user.id, "text", { text: `⚔ ${t.name}: ${opt.label}. ${opt.hint}` }, t.hidden ? dmIdOf(d.campaignId) : null);
     });
 
     socket.on("ping", (p: { x: number; y: number }) => {
@@ -540,6 +565,8 @@ function presence(campaignId: number) {
 
 export interface MonsterDrop {
   meta?: Record<string, unknown>;
+  /** The monster's stat-block numbers and actions, kept on the token for the DM's combat panel (never sent to players) */
+  combat?: MonsterCombat;
   name: string; count: number; hitPoints: number; hitDice?: string; rollHp?: boolean; size?: number; color?: string;
   hidden?: boolean; initiative?: "none" | "each" | "group"; dexMod?: number; x?: number; y?: number; imageUrl?: string | null;
 }
@@ -574,8 +601,8 @@ export function addMonsterTokens(campaignId: number, userId: number, m: MonsterD
     const snapTo = (v: number, off: number) => (Math.round(size) % 2 === 0 ? Math.round((v - off) / g) * g + off : Math.floor((v - off) / g) * g + off + g / 2);
     const x = snapTo(x0 + (i % perRow) * step, map.grid_offset_x || 0), y = snapTo(y0 + Math.floor(i / perRow) * step, map.grid_offset_y || 0);
     const r = run(
-      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp, meta) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp, JSON.stringify(m.meta ?? {}),
+      "INSERT INTO tokens (map_id, name, x, y, size, color, image_url, hidden, hp, max_hp, meta, ac, combat) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      map.id, name.slice(0, 60), x, y, size, m.color ?? "#7a2e1f", m.imageUrl ?? null, m.hidden ? 1 : 0, hp, hp, JSON.stringify(m.meta ?? {}), m.combat?.ac ?? null, JSON.stringify(m.combat ?? {}),
     );
     if (m.initiative && m.initiative !== "none") {
       const init = groupInit ?? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total;

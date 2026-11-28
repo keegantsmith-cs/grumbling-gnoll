@@ -312,6 +312,12 @@ addColumn("campaigns", "discord_invite", "TEXT NOT NULL DEFAULT ''");
 addColumn("campaigns", "discord_server_id", "TEXT NOT NULL DEFAULT ''");
 addColumn("tokens", "rings", "TEXT NOT NULL DEFAULT '[]'");
 addColumn("tokens", "meta", "TEXT NOT NULL DEFAULT '{}'");
+// Combat: monster AC and stat-block actions (DM-only, never sent to players), temporary HP, concentration, timed effects
+addColumn("tokens", "ac", "INTEGER");
+addColumn("tokens", "combat", "TEXT NOT NULL DEFAULT '{}'");
+addColumn("tokens", "temp_hp", "INTEGER NOT NULL DEFAULT 0");
+addColumn("tokens", "concentrating", "TEXT NOT NULL DEFAULT ''");
+addColumn("tokens", "effects", "TEXT NOT NULL DEFAULT '[]'");
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS encounters (
