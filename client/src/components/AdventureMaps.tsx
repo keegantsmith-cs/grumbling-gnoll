@@ -11,13 +11,13 @@ export function AdventureMaps({ campaignId, adventureId, maps, reload, showAdven
   const [page, setPage] = useState("");
   return (
     <div>
-      {maps.length === 0 && <p className="muted">No maps found yet.</p>}
+      {maps.length === 0 && <div className="empty">No maps found yet.{adventureId ? " If you know a page has one, add it below." : ""}</div>}
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))" }}>
         {maps.map((m) => {
           const adv = m.adventureId ?? adventureId!;
           return (
             <div key={m.id} className="card" style={{ padding: 8, marginBottom: 0 }}>
-              <img src={`/api/adventures/${adv}/page/${m.page}?size=thumb`} alt="" loading="lazy" style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 4, background: "#0006" }} />
+              <img src={`/api/adventures/${adv}/page/${m.page}?size=thumb`} alt={`Page ${m.page}: ${m.title}`} loading="lazy" style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 4, background: "#0006" }} />
               <div style={{ fontWeight: 600, marginTop: 4 }}>{m.title}</div>
               <div className="muted" style={{ fontSize: 12 }}>{showAdventure && m.adventure ? `${m.adventure} · ` : ""}p. {m.page}{m.gridType !== "none" ? ` · ${m.gridType} grid` : ""}</div>
               {m.description && <div className="muted" style={{ fontSize: 11 }}>{m.description}</div>}
@@ -25,7 +25,7 @@ export function AdventureMaps({ campaignId, adventureId, maps, reload, showAdven
                 {m.mapId
                   ? <><span className="pill ok">in Maps</span><button className="small" onClick={() => go(`c/${campaignId}/maps`)}>Open</button></>
                   : <button className="small primary" onClick={() => setImporting({ ...m, adventureId: adv })}>Add to Maps</button>}
-                <button className="small danger right" title="Not a map? Remove it from this list" onClick={() => api.del(`/adventure-maps/${m.id}`).then(reload)}>✕</button>
+                <button className="small danger right" title="Not a map? Remove it from this list" aria-label={`Remove ${m.title} from this list`} onClick={() => api.del(`/adventure-maps/${m.id}`).then(reload)}>✕</button>
               </div>
             </div>
           );
@@ -93,7 +93,7 @@ function MapImporter({ m, campaignId, close, done }: { m: AdvMap; campaignId: nu
           onMouseDown={(e) => { const p = pos(e); setDrag(p); setSel({ x: p.x, y: p.y, w: 0, h: 0 }); }}
           onMouseMove={(e) => { if (!drag) return; const p = pos(e); setSel({ x: Math.min(drag.x, p.x), y: Math.min(drag.y, p.y), w: Math.abs(p.x - drag.x), h: Math.abs(p.y - drag.y) }); }}
           onMouseUp={() => setDrag(null)} onMouseLeave={() => setDrag(null)}>
-          <img ref={imgRef} src={`/api/adventures/${m.adventureId}/page/${m.page}`} alt="" draggable={false} onLoad={() => setLoaded(true)} onError={() => toast("Couldn't load that page")}
+          <img ref={imgRef} src={`/api/adventures/${m.adventureId}/page/${m.page}`} alt={`Page ${m.page} of the adventure`} draggable={false} onLoad={() => setLoaded(true)} onError={() => toast("Couldn't load that page")}
             style={{ maxWidth: "100%", maxHeight: "60vh", display: "block" }} />
           {!loaded && <div className="muted" style={{ padding: 40 }}>Drawing the page...</div>}
           {sel && sel.w > 0 && (

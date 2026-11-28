@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { useLoad, useStatus } from "../hooks";
+import { activate, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { EntryView } from "../components/StatBlock";
 import { Duplicates } from "../components/Duplicates";
@@ -25,10 +25,10 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
 
   return (
     <div>
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Compendium</h1>
         {campaign.isDM && <button onClick={() => setDupes(!dupes)}>🧹 Find duplicates</button>}
-        {campaign.isDM && <select style={{ width: "auto" }} value="" onChange={(e) => setNewKind(e.target.value || null)}>
+        {campaign.isDM && <select style={{ width: "auto" }} aria-label="Add a new entry" value="" onChange={(e) => setNewKind(e.target.value || null)}>
           <option value="">+ Add entry...</option>
           <option value="monster">Monster</option><option value="item">Magic item</option><option value="npc">NPC</option><option value="note">Note / handout</option>
         </select>}
@@ -38,17 +38,17 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
       {dupes && campaign.isDM && <Duplicates campaignId={campaign.id} onChanged={() => { list.reload(); setOpenId(null); }} close={() => setDupes(false)} />}
       {newKind && <EntryEditor campaign={campaign} entry={{ kind: newKind, name: "", data: blankData(newKind), status: "approved", playerVisible: false }} close={() => { setNewKind(null); list.reload(); }} />}
       <div className="row" style={{ marginBottom: 10 }}>
-        <input className="grow" placeholder="Search..." value={q} onChange={(e) => setQ(e.target.value)} />
-        <select style={{ width: "auto" }} value={kind} onChange={(e) => setKind(e.target.value)}>
+        <input className="grow" type="search" aria-label="Search the compendium" placeholder="Search by name..." value={q} onChange={(e) => setQ(e.target.value)} />
+        <select style={{ width: "auto" }} aria-label="Show only one kind of entry" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">Everything</option>{Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
         {campaign.isDM && <label className="inline"><input type="checkbox" checked={onlyDrafts} onChange={(e) => setOnlyDrafts(e.target.checked)} /> Drafts only</label>}
       </div>
       <div className="row top">
-        <div style={{ width: 320, maxHeight: "70vh", overflow: "auto" }}>
+        <div className="comp-list">
           <table className="list"><tbody>
             {shown.map((e) => (
-              <tr key={e.id} onClick={() => setOpenId(e.id)} style={{ cursor: "pointer", background: e.id === openId ? "var(--panel-2)" : undefined }}>
+              <tr key={e.id} className={`clickable${e.id === openId ? " selected" : ""}`} aria-current={e.id === openId ? "true" : undefined} {...activate(() => { setOpenId(e.id); if (window.innerWidth <= 900) setTimeout(() => document.querySelector(".comp-detail")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); })}>
                 <td>
                   {e.name}
                   <div className="muted" style={{ fontSize: 12 }}>
@@ -60,9 +60,12 @@ export function Compendium({ campaign, changed }: { campaign: Campaign; changed:
               </tr>
             ))}
           </tbody></table>
-          {shown.length === 0 && <p className="muted">Nothing here yet.</p>}
+          {shown.length === 0 && <div className="empty">{(list.data ?? []).length === 0
+            ? (campaign.isDM ? <><b>Nothing here yet.</b><br />Add a monster, item, NPC or note, or upload an adventure and its characters appear here.</> : <><b>Nothing shared yet.</b><br />Your DM hasn't shared anything with the party.</>)
+            : <><b>No matches.</b><br />Try a different search or filter.</>}</div>}
         </div>
-        <div className="grow">
+        <div className="grow comp-detail">
+          {!open && shown.length > 0 && <div className="empty">Pick something from the list to read it.</div>}
           {open && (campaign.isDM
             ? <EntryEditor key={open.id} campaign={campaign} entry={open} close={() => { list.reload(); }} onDelete={() => { setOpenId(null); list.reload(); toast("Deleted"); }} />
             : <div className="card"><EntryView e={open} /></div>)}
@@ -133,7 +136,7 @@ function EntryEditor({ campaign, entry, close, onDelete }: { campaign: Campaign;
         <>
           {!isStruct && <label>Name<input value={name} onChange={(e) => setName(e.target.value)} /></label>}
           {isStruct
-            ? <label>Stat block (edit the values between quotes)<textarea rows={22} style={{ fontFamily: "monospace", fontSize: 12 }} value={json} onChange={(e) => setJson(e.target.value)} /></label>
+            ? <label>Stat block (edit the values between quotes)<textarea rows={16} style={{ fontFamily: "monospace", fontSize: 12 }} value={json} onChange={(e) => setJson(e.target.value)} /></label>
             : <label>Text (Markdown: # heading, **bold**, - list)<textarea rows={14} value={data.markdown ?? ""} onChange={(e) => setData({ ...data, markdown: e.target.value })} /></label>}
           {entry.kind === "npc" && statJson && <label>Stat block (edit the values between quotes; clear it to remove)<textarea rows={14} style={{ fontFamily: "monospace", fontSize: 12 }} value={statJson} onChange={(e) => setStatJson(e.target.value)} /></label>}
         </>

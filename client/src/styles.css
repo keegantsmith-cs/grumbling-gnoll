@@ -274,3 +274,28 @@ button.big { min-height: 40px; font-size: 15px; }
 .ctx-item:hover:not(:disabled), .ctx-item:focus-visible { background: var(--panel-2); }
 .ctx-item:disabled { opacity: 1; color: var(--muted); white-space: normal; }
 .ctx-sub { padding-left: 28px; }
+
+/* ----- polish: Maps, Adventures, Compendium ----- */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.row.page-head { margin-bottom: 8px; }
+.btn-group { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.map-name { display: flex; align-items: center; gap: 10px; }
+.map-thumb { width: 72px; height: 54px; flex: none; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); background: #0b0907; display: block; }
+.map-settings { padding: 4px 0; }
+.map-settings .name-box { flex: 1 1 200px; }
+td.panel-cell { padding: 8px 0; }
+button.section-toggle { background: none; border: 0; padding: 4px 0; font-weight: 700; text-align: left; min-height: 36px; }
+button.section-toggle:hover:not(:disabled) { color: var(--gold); }
+.comp-list { width: 320px; max-height: 70vh; overflow: auto; flex: none; }
+.comp-detail { flex: 1 1 360px; min-width: 0; }
+table.list tr.selected td { background: var(--panel-2); box-shadow: inset 3px 0 var(--gold); }
+@media (max-width: 900px) {
+  .comp-list { width: 100%; max-height: 40vh; }
+  .comp-detail { flex-basis: 100%; }
+  .btn-group { justify-content: flex-start; }
+}
+@media (max-width: 600px) {
+  table.list.responsive td .btn-group { margin-top: 4px; }
+  table.list.responsive td[style] { text-align: left !important; }
+}
+.map-thumb.placeholder { display: grid; place-items: center; font-size: 22px; background: var(--panel-2); }
