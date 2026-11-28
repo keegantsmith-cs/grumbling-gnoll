@@ -173,14 +173,38 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
 
   return (
     <div className="combat">
-      <div className="row" style={{ marginBottom: 8 }}>
-        <label className="grow" style={{ margin: 0 }}>
-          <span className="muted" style={{ fontSize: 12 }}>Acting</span>
+      <div className="combat-pin">
+        <label className="combat-acting">
+          <span className="muted">Acting</span>
           <select value={tokenId ?? ""} onChange={(e) => setTokenId(e.target.value ? Number(e.target.value) : null)} aria-label="Who is acting">
             <option value="">Pick a token…</option>
             {(campaign.isDM ? tokens : mine).map((t) => <option key={t.id} value={t.id}>{t.name}{t.hidden ? " (hidden)" : ""}</option>)}
           </select>
         </label>
+        {token && canAct && actor && <>
+          {prompt && <OwnDicePrompt p={prompt} cancel={() => setPrompt(null)} />}
+          {last && <div className={`last-result ${last.tone}`} role="status">
+            <span>{last.text}</span>
+            {last.damage && <button className="small primary" onClick={() => damage(last.damage!.a, last.damage!.crit)}>{last.damage.crit ? "💥 Roll critical damage" : "Roll damage"}</button>}
+            {campaign.isDM && last.event && <button className="small" onClick={() => narrate(last.event!)} title="Ask the AI for a short description. You read it first; nothing is posted until you choose.">📖 Narrate</button>}
+            <button className="small link" aria-label="Dismiss result" onClick={() => setLast(null)}>✕</button>
+          </div>}
+          {narr && (
+            <div className="narration" role="region" aria-label="Narration">
+              <b>📖 Narration</b>
+              {narr.loading && <p className="muted">Writing…</p>}
+              {narr.error && <p className="notice">{narr.error}</p>}
+              {!narr.loading && !narr.error && <textarea aria-label="Narration text" rows={3} value={narr.text} onChange={(e) => setNarr({ ...narr, text: e.target.value })} />}
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                <button className="small primary" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(false)}>📢 Post to chat</button>
+                <button className="small" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(true)}>🔒 Keep private</button>
+                <button className="small" disabled={narr.loading} onClick={() => narrate(narr.event, narr.text || undefined)}>🎲 Reroll</button>
+                <button className="small link" onClick={() => setNarr(null)}>Close</button>
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Only the attacker, target, weapon and result are sent to the AI: never HP, AC, hidden monsters or your notes.</div>
+            </div>
+          )}
+        </>}
       </div>
 
       {!token && <p className="muted">{mine.length ? "Pick who is acting, or click a token on the map." : campaign.isDM ? "Put some monsters on the map, then click one to see what it can do." : "Your character needs a token on the map to fight. Ask the DM, or add it from the map's + button."}</p>}
@@ -198,21 +222,21 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
             <div className="seg" role="group" aria-label="Advantage or disadvantage for the next roll">
               {(["normal", "adv", "dis"] as const).map((m) => <button key={m} className={mode === m ? "active" : ""} aria-pressed={mode === m} onClick={() => setMode(m)}>{m === "normal" ? "Normal" : m === "adv" ? "Advantage" : "Disadvantage"}</button>)}
             </div>
-            <label className="inline" style={{ margin: 0 }} title="Roll your real dice, then type what they showed. The site still works out hit or miss.">
+            <label className="inline" title="Roll your real dice, then type what they showed. The site still works out hit or miss.">
               <input type="checkbox" checked={ownDice} onChange={(e) => setOwnDice(e.target.checked)} /> ✍ I'll use my own dice
             </label>
-            <label className="inline" style={{ margin: 0 }} title={visibilityNote}>
+            <label className="inline" title={visibilityNote}>
               <input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} /> {campaign.isDM ? "Show rolls to players" : "Secret roll (DM only)"}
             </label>
           </div>
 
           <div className="group-label">Targets</div>
-          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+          <div className="row combat-targets">
             {targets.map((id) => {
               const t = tokens.find((x) => x.id === id);
-              return t ? <button key={id} className="small chip-on" onClick={() => toggleTarget(id)} title="Click to remove">{t.name} ✕</button> : null;
+              return t ? <button key={id} className="small chip-on" onClick={() => toggleTarget(id)} title="Click to remove" aria-label={`Remove target ${t.name}`}>{t.name} ✕</button> : null;
             })}
-            <select aria-label="Add a target" value="" onChange={(e) => e.target.value && toggleTarget(Number(e.target.value))} style={{ width: "auto", maxWidth: 160 }}>
+            <select aria-label="Add a target" value="" onChange={(e) => e.target.value && toggleTarget(Number(e.target.value))} >
               <option value="">{targets.length ? "+ add another" : "Pick a target…"}</option>
               {candidates.filter((t) => !targets.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}{!t.characterId && t.health && t.health !== "healthy" ? ` (${t.health})` : ""}</option>)}
             </select>
@@ -221,28 +245,6 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
           <div className="group-label">Damage &amp; healing</div>
           <DamageBox attackerId={token.id} onNarrate={campaign.isDM ? narrate : undefined} ids={healthIds} names={healthIds.map((id) => tokens.find((x) => x.id === id)?.name ?? "?")} isDM={campaign.isDM} emit={emit} defenses={campaign.isDM} />
 
-          {prompt && <OwnDicePrompt p={prompt} cancel={() => setPrompt(null)} />}
-          {narr && (
-            <div className="narration" role="region" aria-label="Narration">
-              <b>📖 Narration</b>
-              {narr.loading && <p className="muted">Writing…</p>}
-              {narr.error && <p className="notice">{narr.error}</p>}
-              {!narr.loading && !narr.error && <textarea aria-label="Narration text" rows={4} value={narr.text} onChange={(e) => setNarr({ ...narr, text: e.target.value })} />}
-              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                <button className="small primary" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(false)}>📢 Post to chat</button>
-                <button className="small" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(true)}>🔒 Keep private</button>
-                <button className="small" disabled={narr.loading} onClick={() => narrate(narr.event, narr.text || undefined)}>🎲 Reroll</button>
-                <button className="small link" onClick={() => setNarr(null)}>Close</button>
-              </div>
-              <div className="muted" style={{ fontSize: 12 }}>Only the attacker, target, weapon and result are sent to the AI: never HP, AC, hidden monsters or your notes.</div>
-            </div>
-          )}
-          {last && <div className={`last-result ${last.tone}`} role="status">
-            <span>{last.text}</span>
-            {campaign.isDM && last.event && <button className="small" onClick={() => narrate(last.event!)} title="Ask the AI for a short description. You read it first; nothing is posted until you choose.">📖 Narrate</button>}
-            {last.damage && <button className="small primary" onClick={() => damage(last.damage!.a, last.damage!.crit)}>{last.damage.crit ? "💥 Roll critical damage" : "Roll damage"}</button>}
-            <button className="small link" aria-label="Dismiss" onClick={() => setLast(null)}>✕</button>
-          </div>}
 
           {(["weapon", "spell", "action", "bonus", "reaction", "legendary"] as const).map((sec) => {
             const list = actor.actions.filter((a) => a.section === sec);
@@ -253,7 +255,7 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
                 <div className="col" style={{ gap: 6 }}>
                   {list.map((a) => (
                     <ActionRow key={a.id} a={a} actor={actor}>
-                      <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                      <div className="act-btns">
                         {a.level ? <SlotPicker a={a} actor={actor} value={slotFor(a)} onChange={(n) => setSlots({ ...slots, [a.id]: n })} /> : null}
                         {a.kind === "attack" && <>
                           <button className="small primary" onClick={() => attack(a, false)}>🎲 Attack</button>
@@ -274,13 +276,14 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
             );
           })}
 
-          <div className="group-label">Checks & saves</div>
+          <details className="combat-fold">
+            <summary>Checks &amp; saves</summary>
           <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-            <span className="muted" style={{ fontSize: 12, width: 46 }}>Check</span>
+            <span className="muted combat-rowlabel">Check</span>
             {ABILITIES.map((ab) => <button key={ab} className="small" title={`${ABILITY_NAMES[ab]} check`} onClick={() => abilityRoll("check", ab)}>{ab.toUpperCase()} {fmtMod(actor.mods[ab])}</button>)}
           </div>
           <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-            <span className="muted" style={{ fontSize: 12, width: 46 }}>Save</span>
+            <span className="muted combat-rowlabel">Save</span>
             {ABILITIES.map((ab) => <button key={ab} className="small" title={`${ABILITY_NAMES[ab]} saving throw`} onClick={() => abilityRoll("save", ab)}>{ab.toUpperCase()} {fmtMod(actor.saves[ab])}</button>)}
           </div>
           <div className="row" style={{ gap: 4, marginTop: 4 }}>
@@ -291,10 +294,14 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
             <button className="small" onClick={initiative} title="Add to the turn order">⏱ Initiative {fmtMod(actor.initiative)}</button>
           </div>
 
-          <div className="group-label">Other things you can do</div>
+          </details>
+
+          <details className="combat-fold">
+            <summary>Other things you can do</summary>
           <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
             {STANDARD_OPTIONS.map((o) => <button key={o.key} className="small" title={o.hint} onClick={() => say(o.key)}>{o.label}</button>)}
           </div>
+          </details>
         </>
       )}
     </div>
@@ -438,15 +445,21 @@ function DamageBox({ names, ids, isDM, emit, defenses, attackerId, onNarrate }: 
   const tempAll = () => { if (!n) return; ids.forEach((id) => emit("combat:heal", { tokenId: id, amount: n, temp: true })); setMsg(`${names.join(", ")}: temporary HP ${n}`); setAmt(""); };
   return (
     <div className="damage-box">
-      <div className="muted" style={{ fontSize: 12 }}>On: <b>{names.join(", ") || "—"}</b></div>
-      <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-        <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Amount" aria-label="Damage or healing amount" style={{ width: 80 }} onKeyDown={(e) => e.key === "Enter" && damage()} />
-        {isDM && <select aria-label="Damage type" value={type} onChange={(e) => setType(e.target.value)} style={{ width: "auto" }} title={defenses ? "Resistance, vulnerability and immunity are applied from the stat block" : "Damage type"}>
-          <option value="">type…</option>{DAMAGE_TYPES.map((d) => <option key={d}>{d}</option>)}
-        </select>}
-        <button className="small danger" disabled={!n} onClick={damage}>💥 Damage</button>
-        <button className="small" disabled={!n} onClick={healAll}>💚 Heal</button>
-        <button className="small" disabled={!n} onClick={tempAll} title="Temporary hit points (don't stack: the higher number is kept)">🛡 Temp HP</button>
+      <div className="muted" style={{ fontSize: 13 }}>Applies to: <b>{names.join(", ") || "—"}</b></div>
+      <div className="dmg-fields">
+        <label className="dmg-amt"><span className="muted">Amount</span>
+          <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="0" aria-label="Damage or healing amount" onKeyDown={(e) => e.key === "Enter" && damage()} />
+        </label>
+        {isDM && <label className="dmg-type"><span className="muted">Damage type</span>
+          <select aria-label="Damage type" value={type} onChange={(e) => setType(e.target.value)} title={defenses ? "Resistance, vulnerability and immunity are applied from the stat block" : "Damage type"}>
+            <option value="">Any / none</option>{DAMAGE_TYPES.map((d) => <option key={d}>{d}</option>)}
+          </select>
+        </label>}
+      </div>
+      <div className="dmg-buttons">
+        <button className="danger" disabled={!n} onClick={damage}>💥 Damage</button>
+        <button disabled={!n} onClick={healAll}>💚 Heal</button>
+        <button disabled={!n} onClick={tempAll} title="Temporary hit points (don't stack: the higher number is kept)">🛡 Temp HP</button>
       </div>
       {isDM && ids.length > 1 && (
         <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 4 }}>

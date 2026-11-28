@@ -134,7 +134,7 @@ button.big { min-height: 40px; font-size: 15px; }
 .steps button.small { min-height: 30px; }
 
 /* ----- table view ----- */
-.table-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 340px; }
+.table-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 380px; }
 .board { position: relative; overflow: hidden; background: #0b0907; }
 .board-toolbar { position: absolute; top: 10px; left: 10px; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; background: #000a; padding: 6px; border-radius: 8px; max-width: calc(100% - 20px); }
 .board-toolbar button { padding: 4px 9px; font-size: 13px; min-height: 32px; }
@@ -230,7 +230,7 @@ button.big { min-height: 40px; font-size: 15px; }
   .tabs .tab-icon { display: none; }
 }
 @media (max-width: 1100px) {
-  .table-layout { grid-template-columns: 1fr 300px; }
+  .table-layout { grid-template-columns: 1fr 340px; }
 }
 @media (max-width: 900px) {
   .table-layout { grid-template-columns: 1fr; grid-template-rows: 1fr 45%; }
@@ -353,3 +353,42 @@ button.chip-on { border-color: var(--gold); color: var(--gold); }
 .init-list li { align-items: flex-start; }
 .narration { background: #2a2230; border: 1px solid #7a5aa0; border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
 .narration textarea { width: 100%; margin: 6px 0; font-style: italic; }
+
+/* Combat panel: roomier layout, pinned results, folding extras */
+.combat-pin { position: sticky; top: -10px; z-index: 3; background: var(--panel); margin: -10px -10px 8px; padding: 10px 10px 4px; border-bottom: 1px solid var(--line); max-height: 60%; overflow: auto; }
+.combat-acting { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.combat-acting > span { font-size: 13px; flex: none; }
+.combat-acting select { flex: 1; min-width: 0; }
+.combat-pin .last-result, .combat-pin .own-dice, .combat-pin .narration { margin: 0 0 6px; }
+.combat .roll-controls { gap: 8px 14px; }
+.combat .roll-controls .seg { width: 100%; }
+.combat .seg button { flex: 1; min-height: 36px; font-size: 13px; }
+.combat .roll-controls label.inline { margin: 0; min-height: 28px; }
+.combat .group-label { font-size: 13px; margin: 12px 0 4px; }
+.combat button.small { min-height: 36px; padding: 4px 12px; font-size: 13px; }
+.combat button.link.small { min-width: 36px; }
+.combat select, .combat input:not([type="checkbox"]) { min-height: 36px; }
+.combat input[type="checkbox"] { width: 18px; height: 18px; }
+.combat-targets { gap: 6px; flex-wrap: wrap; }
+.combat-targets select { width: auto; flex: 1 1 140px; min-width: 0; }
+.dmg-fields { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(110px, 1.4fr); gap: 8px; margin-top: 6px; }
+.dmg-fields label { margin: 0; }
+.dmg-fields label > span { display: block; font-size: 12px; margin-bottom: 2px; }
+.dmg-fields input, .dmg-fields select { width: 100%; }
+.dmg-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.dmg-buttons button { min-height: 38px; padding: 4px 6px; white-space: nowrap; }
+.act-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.act-btns select { width: 100%; }
+.act-btns button.primary { min-width: 96px; }
+.combat-rowlabel { font-size: 13px; width: 48px; flex: none; }
+.combat-fold { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 4px; }
+.combat-fold > summary { cursor: pointer; color: var(--muted); font-size: 14px; min-height: 36px; display: flex; align-items: center; }
+.combat-fold > summary:hover { color: var(--gold); }
+.combat-fold[open] > summary { color: var(--text); }
+.combat-fold .row { margin-top: 6px; gap: 6px; flex-wrap: wrap; }
+.combat summary:focus-visible, .combat button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.combat-more > summary { min-height: 32px; display: flex; align-items: center; }
+.combat-summary .hpbar { min-width: 140px; height: 20px; }
+.combat-summary .hpbar-text { line-height: 18px; font-size: 13px; }
+.combat-pin .last-result > span { flex: 1 1 100%; }
+.combat-pin .last-result button.link { margin-left: auto; }
