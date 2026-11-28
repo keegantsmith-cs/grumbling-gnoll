@@ -147,19 +147,30 @@ export function broadcastMap(campaignId: number) {
   if (!io) return;
   const c = one("SELECT active_map_id FROM campaigns WHERE id = ?", campaignId);
   eachSocket(campaignId, (s, d) => s.emit("map", mapPayload(c?.active_map_id ?? null, !!d.isDM)));
+  broadcastInitiative(campaignId); // monsters in the fog show as "???" in the turn order until revealed
 }
 
 export function broadcastInitiative(campaignId: number) {
   if (!io) return;
   const c = one("SELECT initiative FROM campaigns WHERE id = ?", campaignId);
   const state = parseJSON(c?.initiative, { round: 1, turn: 0, entries: [] });
-  eachSocket(campaignId, (s, d) => s.emit("initiative", initiativeFor(state, !!d.isDM)));
+  eachSocket(campaignId, (s, d) => s.emit("initiative", initiativeFor(state, !!d.isDM, campaignId)));
 }
 
-/** Players see hidden monsters in the turn order as "???" so they can't count them in advance. */
-function initiativeFor(state: { round: number; turn: number; entries: Row[] }, isDM: boolean) {
+/**
+ * Players see hidden monsters, and monsters standing in the fog, in the turn order as "???"
+ * so they can't learn names or count them in advance.
+ */
+function initiativeFor(state: { round: number; turn: number; entries: Row[] }, isDM: boolean, campaignId?: number) {
   if (isDM) return state;
-  return { ...state, entries: state.entries.map((e) => (e.hidden ? { id: e.id, name: "???", init: null, hidden: true } : e)) };
+  const activeMap = campaignId ? one("SELECT active_map_id FROM campaigns WHERE id = ?", campaignId)?.active_map_id : null;
+  const fog = activeMap ? fogOf(activeMap) : null;
+  const inFog = (e: Row) => {
+    if (!fog || !e.tokenId) return false;
+    const t = one("SELECT * FROM tokens WHERE id = ? AND map_id = ?", e.tokenId, activeMap);
+    return !!t && !tokenVisible(t, false, fog);
+  };
+  return { ...state, entries: state.entries.map((e) => (e.hidden || inFog(e) ? { id: e.id, name: "???", init: null, hidden: true } : e)) };
 }
 
 export function postChat(campaignId: number, userId: number | null, kind: string, body: unknown, whisperTo: number | null = null) {
@@ -263,7 +274,7 @@ export function initRealtime(server: HttpServer) {
       socket.join(room(d.campaignId));
       const c = one("SELECT active_map_id, initiative FROM campaigns WHERE id = ?", d.campaignId)!;
       socket.emit("map", mapPayload(c.active_map_id, d.isDM));
-      socket.emit("initiative", initiativeFor(parseJSON(c.initiative, { round: 1, turn: 0, entries: [] }), d.isDM));
+      socket.emit("initiative", initiativeFor(parseJSON(c.initiative, { round: 1, turn: 0, entries: [] }), d.isDM, d.campaignId));
       const history = all(
         "SELECT c.*, u.display_name AS name FROM chat c LEFT JOIN users u ON u.id = c.user_id WHERE c.campaign_id = ? ORDER BY c.id DESC LIMIT 150",
         d.campaignId,
@@ -321,14 +332,16 @@ export function initRealtime(server: HttpServer) {
       const fog = fogOf(t.map_id);
       const after = { ...t, x: moved.x, y: moved.y };
       const activeMap = one("SELECT active_map_id FROM campaigns WHERE id = ?", d.campaignId)?.active_map_id;
+      let needInit = false;
       eachSocket(d.campaignId, (s, sd) => {
         if (sd.isDM) return void s.emit("token:moved", moved);
         const before = tokenVisible(t, false, fog), now = tokenVisible(after, false, fog);
         if (before && now) s.emit("token:moved", moved);
         // Walked out of the fog: this player's browser has never heard of the token, so send the fresh map.
         // Walked into the fog: send the fresh map so the token disappears.
-        else if (before !== now && t.map_id === activeMap) s.emit("map", mapPayload(t.map_id, false));
+        else if (before !== now && t.map_id === activeMap) { s.emit("map", mapPayload(t.map_id, false)); needInit = true; }
       });
+      if (needInit) broadcastInitiative(d.campaignId);
     });
 
     socket.on("token:add", (p: Row) => {

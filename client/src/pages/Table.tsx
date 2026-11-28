@@ -309,7 +309,7 @@ function Board({ map, campaign, live }: { map: MapState; campaign: Campaign; liv
           <PoiLayer map={map} scale={view.scale} isDM={isDM} onPick={(p, s) => setPoiOpen({ p, at: s })} />
           {map.tokens.map((t) => (
             <TokenNode key={t.id} t={t} map={map} scale={view.scale} draggable={tool === "select" && canControl(t)} selected={t.id === selected}
-              onSelect={() => setSelected(t.id)}
+              onSelect={() => setSelected(t.id)} onPress={startLongPress}
               onMove={(x, y) => live.socket?.emit("token:move", { id: t.id, x, y })} />
           ))}
         </Layer>
@@ -395,7 +395,7 @@ function FogShapes({ map, draft }: { map: MapState; draft: FogShape | null }) {
   );
 }
 
-function TokenNode({ t, map, scale, draggable, selected, onSelect, onMove }: { t: Token; map: MapState; scale: number; draggable: boolean; selected: boolean; onSelect: () => void; onMove: (x: number, y: number) => void }) {
+function TokenNode({ t, map, scale, draggable, selected, onSelect, onPress, onMove }: { t: Token; map: MapState; scale: number; draggable: boolean; selected: boolean; onSelect: () => void; onPress?: (e: Konva.KonvaEventObject<PointerEvent>) => void; onMove: (x: number, y: number) => void }) {
   const img = useHtmlImage(t.imageUrl);
   const r = (map.gridSize * t.size) / 2 * 0.92;
   const hpPct = t.hp != null && t.maxHp ? Math.max(0, Math.min(1, t.hp / t.maxHp)) : null;
@@ -408,7 +408,7 @@ function TokenNode({ t, map, scale, draggable, selected, onSelect, onMove }: { t
       x={t.x}
       y={t.y}
       draggable={draggable}
-      onPointerDown={(e) => { if (e.evt.button === 2) return; e.cancelBubble = true; onSelect(); }}
+      onPointerDown={(e) => { if (e.evt.button === 2) return; onPress?.(e); e.cancelBubble = true; onSelect(); }}
       onTap={onSelect}
       onDragEnd={(e) => {
         const s = snap(map, e.target.x(), e.target.y(), t.size);

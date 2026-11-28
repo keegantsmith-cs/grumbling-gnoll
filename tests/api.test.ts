@@ -711,3 +711,25 @@ test("fog of war: players never receive tokens standing in fog (server-side), th
   assert.deepEqual(names(D), ["Fogged Orc", "Mirabel", "Open Orc"]);
   for (const L of [D, S, J]) L.s.close();
 });
+
+test("initiative: monsters standing in the fog show as ??? until the DM reveals them", async () => {
+  const mid = (await dm.post(`/campaigns/${campaignId}/maps/generate`, { cols: 30, rows: 24, seed: 4, rooms: 8, theme: "stone", name: "Fog Initiative" })).data.id;
+  assert.equal((await dm.post(`/campaigns/${campaignId}/active-map`, { mapId: mid })).status, 200);
+  const D = await live(dm), S = await live(sam);
+  D.s.emit("token:add", { name: "Fog Goblin", x: 100, y: 100 });
+  await waitFor(() => has(D.last("map"), "Fog Goblin"));
+  const tid = D.last("map").tokens.find((t: any) => t.name === "Fog Goblin").id;
+  D.s.emit("initiative", { op: "add", name: "Fog Goblin", init: 14, dex: 2, tokenId: tid });
+  await waitFor(() => (S.last("initiative")?.entries.length ?? 0) === 1);
+  assert.equal(S.last("initiative").entries[0].name, "???");
+  assert.equal(has(S.all("initiative"), "Fog Goblin"), false);
+  assert.equal(D.last("initiative").entries[0].name, "Fog Goblin");
+  // Revealing the area shows the goblin in the turn order
+  D.s.emit("fog", { op: "add", shape: { mode: "reveal", kind: "circle", x: 100, y: 100, r: 100 } });
+  await waitFor(() => S.last("initiative").entries[0].name === "Fog Goblin");
+  // Covering it again hides it again
+  D.s.emit("fog", { op: "add", shape: { mode: "hide", kind: "rect", x: 0, y: 0, w: 300, h: 300 } });
+  await waitFor(() => S.last("initiative").entries[0].name === "???");
+  D.s.emit("initiative", { op: "clear" });
+  for (const L of [D, S]) L.s.close();
+});
