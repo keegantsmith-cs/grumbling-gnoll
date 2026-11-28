@@ -124,12 +124,12 @@ export function parseMonsterActions(m: Record<string, any>): CombatAction[] {
       if (uses) act.uses = uses[1];
       if (cost) act.cost = Number(cost[1]);
       else if (section === "legendary") act.cost = 1;
-      const atk = text.match(/(Melee|Ranged)(?: or (Melee|Ranged))?\s+(Weapon|Spell)\s+Attack:\s*([+-]\d+)\s+to hit/i);
+      const atk = text.match(/(Melee|Ranged)(?: or (Melee|Ranged))?\s+(Weapon|Spell)\s+Attack:\s*([+-])\s*(\d+)\s+to hit/i);
       if (/^multiattack/i.test(name)) {
         act.kind = "multiattack";
       } else if (atk) {
         act.kind = "attack";
-        act.toHit = Number(atk[4]);
+        act.toHit = Number(`${atk[4]}${atk[5]}`);
         act.melee = /melee/i.test(atk[1]) || /melee/i.test(atk[2] ?? "");
         act.magical = /spell/i.test(atk[3]);
         const reach = [...text.matchAll(/(reach \d+ ft\.?|range \d+(?:\/\d+)? ft\.?)/gi)].map((r) => r[1].replace(/\.$/, ""));
@@ -162,7 +162,10 @@ export function parseMonsterActions(m: Record<string, any>): CombatAction[] {
     for (const s of siblings) {
       const base = escapeRe(s.name.toLowerCase());
       const re = new RegExp(`\\b(one|two|three|four|five|six|an?|\\d+)\\b(?:(?!\\b(?:one|two|three|four|five|six|\\d+)\\b)[^.;:]){0,40}?\\b${base}s?\\b`);
-      const m = text.match(re);
+      let m = text.match(re);
+      // "one with its stinger" for an action called "Tail Stinger": try the last word of the name too
+      const last = s.name.toLowerCase().split(/\s+/).pop()!;
+      if (!m && last !== s.name.toLowerCase()) m = text.match(new RegExp(`\\b(one|two|three|four|five|six|an?|\\d+)\\b(?:(?!\\b(?:one|two|three|four|five|six|\\d+)\\b)[^.;:]){0,40}?\\b${escapeRe(last)}s?\\b`));
       if (m) multi.push({ name: s.name, count: COUNT_WORDS[m[1]] ?? (Number(m[1]) || 1) });
     }
     if (!multi.length && siblings.length) {
@@ -305,7 +308,10 @@ export function characterActions(c: CharacterData, dv: Derived, spellFacts: (nam
     base.level = f.level;
     base.range = f.range;
     base.concentration = /concentration/i.test(f.duration ?? "");
-    const dice = f.damage ? (f.level === 0 ? cantripDice(f.damage, dv.level) : f.damage) : "";
+    // Eldritch Blast grows by extra beams (one attack roll each), not by bigger dice
+    const beams = /^eldritch blast$/i.test(f.name) ? (dv.level >= 17 ? 4 : dv.level >= 11 ? 3 : dv.level >= 5 ? 2 : 1) : 0;
+    const dice = f.damage ? (f.level === 0 && !beams ? cantripDice(f.damage, dv.level) : f.damage) : "";
+    if (beams > 1) base.text = [`Fires ${beams} beams: use this once per beam (each beam is its own attack roll).`, s.notes].filter(Boolean).join(" ");
     const type = (f.damageType ?? "").toLowerCase();
     const up = f.higher?.match(/increases? by (\d+d\d+) for each (?:slot )?level above (\d)/i);
     if (up) base.upcast = { dice: up[1], above: Number(up[2]) };
@@ -362,8 +368,9 @@ export function adjustDamage(amount: number, type: string, def: Defenses, o: { h
   if (t && def.immune.some(applies)) return { amount: 0, note: `immune to ${t}` };
   const res = t && def.resist.some(applies);
   const vul = t && def.vuln.some(applies);
-  if (res && !vul) { n = Math.floor(n / 2); notes.push(`resistant to ${t}`); }
-  else if (vul && !res) { n *= 2; notes.push(`vulnerable to ${t}`); }
+  // Resistance is applied first, then vulnerability (several sources of either never stack). Both: halve (round down), then double.
+  if (res) { n = Math.floor(n / 2); notes.push(`resistant to ${t}`); }
+  if (vul) { n *= 2; notes.push(`vulnerable to ${t}`); }
   return { amount: n, note: notes.join(", ") };
 }
 
@@ -391,15 +398,15 @@ export function takeDamage(s: HpState, amount: number, o: { crit?: boolean; conc
     if (hp <= 0) {
       // Already down: a character takes a death-save failure (two on a critical hit); a monster is simply finished off
       if (s.isCharacter && ds) {
-        if (rest >= s.max) { dead = true; notes.push("massive damage: dead"); }
-        else { ds.failures = Math.min(3, ds.failures + (o.crit ? 2 : 1)); notes.push(`death save failure${o.crit ? "s (critical hit)" : ""}`); if (ds.failures >= 3) { dead = true; notes.push("three failures: dead"); } }
+        if (rest >= s.max) { dead = true; ds.failures = 3; notes.push("massive damage: dead"); }
+        else { ds.successes = 0; /* a stable character who is hurt starts rolling death saves again */ ds.failures = Math.min(3, ds.failures + (o.crit ? 2 : 1)); notes.push(`death save failure${o.crit ? "s (critical hit)" : ""}`); if (ds.failures >= 3) { dead = true; notes.push("three failures: dead"); } }
       }
     } else {
       const left = hp - rest;
       if (left <= 0) {
         hp = 0; dropped = true;
         const over = rest - s.hp;
-        if (s.isCharacter && over >= s.max) { dead = true; notes.push("massive damage: dead outright"); }
+        if (s.isCharacter && over >= s.max) { dead = true; if (ds) ds.failures = 3; notes.push("massive damage: dead outright"); }
         else notes.push(s.isCharacter ? "drops to 0 HP and falls unconscious" : "drops to 0 HP");
       } else hp = left;
     }

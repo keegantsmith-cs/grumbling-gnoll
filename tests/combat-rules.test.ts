@@ -201,3 +201,103 @@ test("stat blocks: breath weapons recharge on 5-6 even though the bundled SRD da
   // ordinary attacks and legendary actions don't recharge
   assert.equal(parseMonsterActions(monster("Adult Red Dragon")).find((a) => a.name === "Bite")!.recharge, undefined);
 });
+
+// ---------- rules review additions ----------
+
+test("damage: resistance and vulnerability together halve (round down) then double; extra sources don't stack", () => {
+  const both = { resist: [{ type: "fire" }], vuln: [{ type: "fire" }], immune: [] };
+  assert.equal(adjustDamage(9, "fire", both).amount, 8); // 9 -> 4 -> 8
+  assert.equal(adjustDamage(9, "fire", { resist: [{ type: "fire" }, { type: "fire" }], vuln: [], immune: [] }).amount, 4);
+  // immunity beats everything, even vulnerability
+  assert.equal(adjustDamage(9, "fire", { resist: [], vuln: [{ type: "fire" }], immune: [{ type: "fire" }] }).amount, 0);
+  // a successful save halves first, then vulnerability doubles: 15 -> 7 -> 14
+  assert.equal(adjustDamage(15, "cold", { resist: [], vuln: [{ type: "cold" }], immune: [] }, { half: true }).amount, 14);
+  // resistance to nonmagical weapons does not apply to a magical attack, and typeless damage is never adjusted
+  assert.equal(adjustDamage(7, "", { resist: [{ type: "fire" }], vuln: [], immune: [] }).amount, 7);
+});
+
+test("hit points: massive damage and temp HP edge cases", () => {
+  // temp HP is used up before the "left over" damage is compared with max HP
+  assert.equal(takeDamage({ hp: 5, max: 30, temp: 10, isCharacter: true }, 44).dead, false); // 44-10-5 = 29 left over
+  assert.equal(takeDamage({ hp: 5, max: 30, temp: 10, isCharacter: true }, 45).dead, true);  // 30 left over
+  // exactly enough to reach 0 is not death
+  const r = takeDamage({ hp: 5, max: 30, temp: 0, isCharacter: true }, 5);
+  assert.deepEqual([r.hp, r.dropped, r.dead], [0, true, false]);
+  // damage fully soaked by temp HP at 0 HP gives no death-save failure
+  const down = { hp: 0, max: 30, temp: 5, isCharacter: true, deathSaves: { successes: 0, failures: 0 } };
+  assert.equal(takeDamage(down, 5).deathSaves!.failures, 0);
+  // instant death means the sheet reads as dead (3 failures), not "still rolling"
+  assert.equal(takeDamage({ hp: 5, max: 30, temp: 0, isCharacter: true }, 40).deathSaves!.failures, 3);
+  assert.equal(takeDamage({ hp: 0, max: 30, temp: 0, isCharacter: true, deathSaves: { successes: 1, failures: 0 } }, 30).deathSaves!.failures, 3);
+  // a stable character (3 successes) who is hurt starts rolling again
+  assert.deepEqual(takeDamage({ hp: 0, max: 30, temp: 0, isCharacter: true, deathSaves: { successes: 3, failures: 0 } }, 3).deathSaves, { successes: 0, failures: 1 });
+  // concentration: half of 50 is 25
+  assert.equal(takeDamage({ hp: 60, max: 60, temp: 0, isCharacter: true }, 50, { concentrating: true }).concentrationDC, 25);
+});
+
+test("death saves: 9 fails, 10 succeeds, failures and successes accumulate separately", () => {
+  assert.equal(deathSave({ successes: 0, failures: 0 }, 9).outcome, "failure");
+  assert.equal(deathSave({ successes: 0, failures: 0 }, 10).outcome, "success");
+  const s = deathSave({ successes: 1, failures: 1 }, 12);
+  assert.deepEqual([s.successes, s.failures, s.outcome], [2, 1, "success"]);
+  assert.equal(deathSave({ successes: 0, failures: 1 }, 1).outcome, "dead"); // 1 + 2 = 3
+});
+
+test("healing: at 0 HP any healing wakes the character; healing never touches temp HP", () => {
+  const h = heal({ hp: 0, max: 20, temp: 4, isCharacter: true, deathSaves: { successes: 1, failures: 1 } }, 1);
+  assert.equal(h.hp, 1);
+  assert.equal(h.revived, true);
+  assert.equal(heal({ hp: 5, max: 20, temp: 4, isCharacter: true, deathSaves: { successes: 0, failures: 0 } }, 3).revived, false);
+});
+
+test("characters: Eldritch Blast adds beams (one roll each), not bigger dice; other cantrips add dice", () => {
+  const c = { ...blankCharacter(), classes: [{ name: "Warlock", subclass: "", level: 11 }], abilities: { str: 8, dex: 14, con: 14, int: 10, wis: 12, cha: 18 } } as any;
+  c.spells = [{ name: "Eldritch Blast", level: 0, prepared: true, notes: "" }, { name: "Chill Touch", level: 0, prepared: true, notes: "" }];
+  const facts: any = {
+    "Eldritch Blast": { name: "Eldritch Blast", level: 0, attack: "ranged", save: "", damage: "1d10", damageType: "Force", range: "120 feet", duration: "Instantaneous" },
+    "Chill Touch": { name: "Chill Touch", level: 0, attack: "ranged", save: "", damage: "1d8", damageType: "Necrotic", range: "120 feet", duration: "1 round" },
+  };
+  const { actions } = characterActions(c, derive(c), (n) => facts[n]);
+  const eb = actions.find((a) => a.name === "Eldritch Blast")!;
+  assert.deepEqual(eb.damage, [{ dice: "1d10", type: "force" }]);
+  assert.match(eb.text!, /3 beams/);
+  assert.deepEqual(actions.find((a) => a.name === "Chill Touch")!.damage, [{ dice: "3d8", type: "necrotic" }]);
+});
+
+test("characters: unarmed strike is 1 + Str (never below 1) and a negative Str lowers to-hit only", () => {
+  const c = { ...blankCharacter(), classes: [{ name: "Wizard", subclass: "", level: 1 }], abilities: { str: 6, dex: 10, con: 10, int: 10, wis: 10, cha: 10 } } as any;
+  const u = characterActions(c, derive(c)).actions.find((a) => a.id === "unarmed")!;
+  assert.equal(u.toHit, -2 + 2);
+  assert.deepEqual(u.damage, [{ dice: "1", type: "bludgeoning" }]);
+});
+
+test("stat blocks: spaced bonuses and 'Tail Stinger' style names are still read (Ancient Black Dragon, Purple Worm)", () => {
+  const bite = parseMonsterActions(monster("Ancient Black Dragon")).find((a) => a.name === "Bite")!;
+  assert.equal(bite.kind, "attack");
+  assert.equal(bite.toHit, 15);
+  const multi = parseMonsterActions(monster("Ancient Black Dragon")).find((a) => a.kind === "multiattack")!;
+  assert.deepEqual(multi.multi, [{ name: "Bite", count: 1 }, { name: "Claw", count: 2 }]);
+  const worm = parseMonsterActions(monster("Purple Worm")).find((a) => a.kind === "multiattack")!;
+  assert.deepEqual(worm.multi, [{ name: "Bite", count: 1 }, { name: "Tail Stinger", count: 1 }]);
+});
+
+test("stat blocks: spot checks (Owlbear, Ogre, Young Red Dragon, Giant Spider, Werewolf)", () => {
+  const owl = parseMonsterActions(monster("Owlbear"));
+  assert.deepEqual(owl.find((a) => a.kind === "multiattack")!.multi, [{ name: "Beak", count: 1 }, { name: "Claws", count: 1 }]);
+  assert.deepEqual(owl.find((a) => a.name === "Claws")!.damage, [{ dice: "2d8+5", type: "slashing" }]);
+  const ogre = parseMonsterActions(monster("Ogre"));
+  assert.equal(ogre.find((a) => a.name === "Greatclub")!.toHit, 6);
+  assert.equal(ogre.find((a) => a.name === "Javelin")!.melee, true); // "Melee or Ranged"
+  assert.match(ogre.find((a) => a.name === "Javelin")!.range!, /30\/120/);
+  const yrd = parseMonsterActions(monster("Young Red Dragon")).find((a) => a.name === "Fire Breath")!;
+  assert.deepEqual(yrd.save, { ability: "dex", dc: 17, half: true });
+  assert.deepEqual(yrd.damage, [{ dice: "16d6", type: "fire" }]);
+  const spider = parseMonsterActions(monster("Giant Spider"));
+  assert.equal(spider.find((a) => a.name === "Bite")!.toHit, 5);
+  const wolf = monsterCombatData(monster("Werewolf, Wolf Form"));
+  assert.ok(wolf.immune.some((d) => d.nonmagical)); // nonmagical, non-silvered weapons
+});
+
+test("crits: extra dice such as Sneak Attack are doubled too", () => {
+  assert.equal(doubleDice("+2d6"), "+4d6");
+});

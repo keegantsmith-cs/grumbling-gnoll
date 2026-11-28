@@ -139,7 +139,7 @@ function rollDamage(parts: { dice: string; type: string }[], crit: boolean, manu
   const details: string[] = [], dice: RolledDie[] = [];
   parts.forEach((p, i) => {
     let expr = crit ? doubleDice(p.dice) : p.dice;
-    if (i === 0 && extraDice) expr += extraDice;
+    if (i === 0 && extraDice) expr += crit ? doubleDice(extraDice) : extraDice; // e.g. Sneak Attack dice double on a crit
     const r: RollResult = rollDice(expr);
     out.push({ amount: Math.max(0, r.total), type: p.type });
     details.push(`${describeRoll(r)}${p.type ? ` ${p.type}` : ""}`);
@@ -468,7 +468,7 @@ export function turnChanged(cid: number, ev: { prev?: Row; prevRound: number; cu
     if (!isCur) continue;
     for (const e of due(t, ev.cur, "start", ev.round)) say(t, `⏰ Start of ${t.name}'s turn: ${e.name} ${e.condition ? "should end now (remove it from the Combat tab, or roll the save if it says save ends)" : "has run out"}.`);
     const a = buildActor(t);
-    if (a.kind === "character" && (a.hp ?? 1) <= 0 && (a.deathSaves?.failures ?? 0) < 3) postChat(cid, null, "text", { text: `💀 ${t.name} is at 0 HP: roll a death saving throw (Combat tab).` });
+    if (a.kind === "character" && (a.hp ?? 1) <= 0 && (a.deathSaves?.failures ?? 0) < 3 && (a.deathSaves?.successes ?? 0) < 3) postChat(cid, null, "text", { text: `💀 ${t.name} is at 0 HP: roll a death saving throw (Combat tab).` });
     for (const act of a.actions) if (act.recharge && (a.used[act.id] ?? 0) > 0) postChat(cid, null, "text", { text: `🔁 ${t.name}'s ${act.name} is spent: roll recharge (${act.recharge}) from the Combat tab.` }, dmIdOf(cid));
     if (t.concentrating && !hiddenFromPlayers(t)) postChat(cid, null, "text", { text: `🔵 ${t.name} is concentrating on ${t.concentrating}.` });
   }
