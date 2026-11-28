@@ -114,7 +114,7 @@ function CombatBadge({ c }: { c: any }) {
   if (c.kind === "saveall") {
     return (
       <div className="combat-badge">
-        {c.rows.map((r: any) => <div key={r.id}>{r.success ? "✔" : "✘"} {r.name}: {r.total} vs DC {c.dc} {r.success ? (c.half ? "(half damage)" : "(no effect)") : ""}</div>)}
+        {c.rows.map((r: any) => <div key={r.id}>{r.success ? "✔" : "✘"} {r.name}: {r.total != null ? `${r.total} vs ` : "vs "}DC {c.dc} {r.success ? (c.half ? "(half damage)" : "(no effect)") : ""}</div>)}
       </div>
     );
   }

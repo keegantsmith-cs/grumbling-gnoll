@@ -220,6 +220,8 @@ export function registerCombat(socket: Socket) {
   const mine = (p: any): Row => {
     if (!d.campaignId) throw new Error("Not in a campaign");
     const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
+    // Players get the same answer whether the token doesn't exist, is hidden, or just isn't theirs
+    if (!t && !d.isDM) throw new Error("That isn't your token");
     if (!t) throw new Error("That token isn't on the map any more");
     if (!controlsToken(t, d.user.id, !!d.isDM)) throw new Error("That isn't your token");
     return t;
@@ -233,7 +235,7 @@ export function registerCombat(socket: Socket) {
     const t = mine(p);
     const opt = STANDARD_OPTIONS.find((o) => o.key === p?.key);
     if (!opt) throw new Error("Unknown option");
-    postChat(d.campaignId!, d.user.id, "text", { text: `⚔ ${t.name}: ${opt.label}. ${opt.hint}` }, t.hidden ? dmIdOf(d.campaignId!) : null);
+    postChat(d.campaignId!, d.user.id, "text", { text: `⚔ ${t.name}: ${opt.label}. ${opt.hint}` }, unseenByPlayers(t) ? dmIdOf(d.campaignId!) : null);
     if (opt.effect === "dodge") { addEffect(d.campaignId!, t, { name: "Dodging", at: "start", rounds: 0 }); broadcastMap(d.campaignId!); }
     return { ok: true };
   }));
@@ -245,11 +247,11 @@ export function registerCombat(socket: Socket) {
     const list = (Array.isArray(p?.targets) ? p.targets : []).slice(0, 20);
     const results = [];
     for (const x of list) {
-      const t = tokenOnActiveMap(Number(x.tokenId), cid);
-      if (!t) continue;
+      const t = tokenOnActiveMap(Number(x?.tokenId), cid);
+      if (!t && d.isDM) continue;
       // Players may only apply damage to their own character (e.g. "you take 6 damage" from the DM)
-      if (!d.isDM && !(controlsToken(t, d.user.id, false) && (t.character_id || t.controlled_by))) throw new Error("Only the DM can apply damage to others");
-      results.push(applyDamageTo(cid, t, x));
+      if (!d.isDM && !(t && controlsToken(t, d.user.id, false) && (t.character_id || t.controlled_by))) throw new Error("Only the DM can apply damage to others");
+      results.push(applyDamageTo(cid, t!, x));
     }
     if (p?.msgId && d.isDM) markApplied(cid, Number(p.msgId));
     broadcastMap(cid);
@@ -259,7 +261,7 @@ export function registerCombat(socket: Socket) {
   socket.on("combat:heal", (p: any, ack: unknown) => guard(ack, () => {
     const t = mine(p);
     const kind = p?.temp ? "temp" : "heal";
-    const out = kind === "temp" ? giveTempHp(d.campaignId!, t, Number(p.amount)) : healToken(d.campaignId!, t, Number(p.amount));
+    const out = kind === "temp" ? giveTempHp(d.campaignId!, t, clampInt(p.amount, 0, 9999)) : healToken(d.campaignId!, t, clampInt(p.amount, 0, 9999));
     broadcastMap(d.campaignId!);
     return { ok: true, ...out };
   }));
@@ -306,6 +308,8 @@ export function registerCombat(socket: Socket) {
 
 /** Monsters and hidden tokens keep their business between the DM and the dice. */
 const hiddenFromPlayers = (t: Row) => !!t.hidden || (!t.character_id && !t.controlled_by);
+/** Hidden, or standing in fog the players can't see through: not to be named in anything players read. */
+const unseenByPlayers = (t: Row) => !!t.hidden || !tokenVisible(t, false, fogOf(t.map_id));
 
 // ----- hit points -----
 
@@ -348,7 +352,7 @@ function applyDamageTo(cid: number, t: Row, x: DamageRequest) {
   let total = 0;
   const notes: string[] = [];
   for (const part of parts) {
-    const adj = adjustDamage(Number(part.amount) || 0, String(part.type ?? ""), def, { half: !!x.half, magical: !!x.magical });
+    const adj = adjustDamage(clampInt(part?.amount, 0, 9999), String(part?.type ?? "").slice(0, 30), def, { half: !!x.half, magical: !!x.magical });
     total += adj.amount;
     if (adj.note) notes.push(adj.note);
   }
@@ -360,14 +364,14 @@ function applyDamageTo(cid: number, t: Row, x: DamageRequest) {
   if (r.dead) addCondition(t, a.kind === "character" ? "Dead" : "Dead");
   const secret = hiddenFromPlayers(t);
   const typeText = parts.length === 1 && parts[0].type ? ` ${parts[0].type}` : "";
-  const sourceText = x.source ? ` from ${x.source}` : "";
+  const sourceText = x.source ? ` from ${String(x.source).slice(0, 80)}` : "";
   const hpText = a.kind === "character" || !secret ? "" : ` (${r.hp}/${max} HP)`;
   // Players hear about their own side in full, and only that a visible monster fell. Numbers about monsters go to the DM.
   if (a.kind === "character") {
     postChat(cid, null, "text", { text: `💥 ${t.name} takes ${total}${typeText} damage${sourceText}${notes.length ? ` (${notes.join(", ")})` : ""}. HP ${r.hp}/${max}${r.temp ? ` +${r.temp} temp` : ""}.${r.dropped ? " Down!" : ""}${r.dead ? " Dead." : ""}${r.deathSaves && !r.dropped && !r.dead && before <= 0 ? ` Death save failures: ${r.deathSaves.failures}/3.` : ""}` });
   } else {
     postChat(cid, null, "text", { text: `💥 ${t.name} takes ${total}${typeText} damage${sourceText}${notes.length ? ` (${notes.join(", ")})` : ""}${hpText}.${r.dropped ? " Drops to 0." : ""}` }, dmIdOf(cid));
-    if (r.dropped && !t.hidden) postChat(cid, null, "text", { text: `☠ ${t.name} is down.` });
+    if (r.dropped && !unseenByPlayers(t)) postChat(cid, null, "text", { text: `☠ ${t.name} is down.` });
   }
   let conc: { tokenId: number; dc: number; spell: string } | null = null;
   if (r.concentrationDC && String(t.concentrating)) {
@@ -547,7 +551,7 @@ function handleRoll(d: SocketData, p: any) {
       const combat = {
         kind: "attack", actor: who, action: a.name, target: target ? { id: target.id, name: target.name } : null, outcome,
         // The target's AC is only written into messages the DM alone can see
-        ...(whisper != null && targetActor?.ac != null ? { ac: targetActor.ac } : {}),
+        ...(d.isDM && whisper != null && targetActor?.ac != null ? { ac: targetActor.ac } : {}),
         ...(dmg ? { damage: { total: dmg.total, parts: dmg.parts, crit: outcome === "crit" } } : {}),
         magical: !!a.magical, melee: !!a.melee,
         ...(dmg && target ? { apply: { tokenIds: [target.id], parts: dmg.parts, magical: !!a.magical, crit: outcome === "crit", source: `${who}'s ${a.name}` } } : {}),
@@ -581,18 +585,24 @@ function handleRoll(d: SocketData, p: any) {
       if (a.concentration) setConcentration(cid, t, a.name, whisper);
       markUsed(t, a);
       const dmg = a.damage?.length ? rollDamage(upcastParts(a, p.slot), false, p.manualDamage) : null;
-      const manualSaves = (p.manualSaves ?? {}) as Record<string, unknown>;
+      const manualSaves = (p.manualSaves && typeof p.manualSaves === "object" ? p.manualSaves : {}) as Record<string, unknown>;
       const rows = targets.map((x) => {
         const ta = buildActor(x);
-        const r = rollD20(ta.saves[a.save!.ability], "normal", manualSaves[String(x.id)]);
+        // Typed-in dice only count for the DM or for a creature the roller controls (nobody types a result for the DM's monsters)
+        const typedIn = d.isDM || controlsToken(x, d.user.id, false) ? manualSaves[String(x.id)] : undefined;
+        const r = rollD20(ta.saves[a.save!.ability], "normal", typeof manualSaves === "object" && Object.prototype.hasOwnProperty.call(manualSaves, String(x.id)) ? typedIn : undefined);
         const success = r.total >= a.save!.dc;
-        return { id: x.id, name: x.name, natural: r.natural, total: r.total, success, typed: r.typed };
+        // A monster's save bonus must not leak: its dice and total are only shown when the DM rolled it for the DM's eyes
+        const monster = !x.character_id && !x.controlled_by;
+        return { id: x.id, name: x.name, natural: r.natural, total: r.total, success, typed: r.typed, monster };
       });
-      const lines = rows.map((r) => `${r.name}: ${r.total} (${r.natural}${r.typed ? ", typed in" : ""}) ${r.success ? "✓ saves" : "✗ fails"}`);
+      const showNumbers = d.isDM && whisper != null;
+      const lines = rows.map((r) => (r.monster && !showNumbers ? `${r.name}: ${r.success ? "✓ saves" : "✗ fails"}` : `${r.name}: ${r.total} (${r.natural}${r.typed ? ", typed in" : ""}) ${r.success ? "✓ saves" : "✗ fails"}`));
+      const shownRows = rows.map(({ monster, ...r }) => (monster && !showNumbers ? { ...r, natural: null, total: null, typed: false } : r));
       const apply = dmg ? { tokenIds: rows.map((r) => r.id), parts: dmg.parts, magical: !!a.magical, crit: false, source: `${who}'s ${a.name}`, halfFor: rows.filter((r) => r.success && a.save!.half).map((r) => r.id), noneFor: rows.filter((r) => r.success && !a.save!.half).map((r) => r.id) } : undefined;
-      const combat = { kind: "saveall", actor: who, action: a.name, dc: a.save.dc, ability: a.save.ability, half: a.save.half, rows, ...(dmg ? { total: dmg.total, parts: dmg.parts } : {}), ...(apply ? { apply } : {}) };
+      const combat = { kind: "saveall", actor: who, action: a.name, dc: a.save.dc, ability: a.save.ability, half: a.save.half, rows: shownRows, ...(dmg ? { total: dmg.total, parts: dmg.parts } : {}), ...(apply ? { apply } : {}) };
       base({ total: dmg?.total ?? a.save.dc, detail: `${dmg ? `${dmg.detail}. ` : ""}DC ${a.save.dc} ${ABILITY_LABEL(a.save.ability)} save — ${lines.join("; ")}`, expression: dmg ? "damage" : `DC ${a.save.dc}`, dice: dmg?.dice ?? [] }, `${who}: ${a.name} (DC ${a.save.dc} ${a.save.ability.toUpperCase()} save)`, combat);
-      return { ok: true, rows, total: dmg?.total, parts: dmg?.parts, apply, spellSlot: p.slot };
+      return { ok: true, rows: shownRows, total: dmg?.total, parts: dmg?.parts, apply, spellSlot: p.slot };
     }
 
     case "cast": {
@@ -650,7 +660,7 @@ export function narrationFacts(cid: number, ev: NarrationEvent): string {
     if (id == null) return "";
     const t = tokenOnActiveMap(Number(id), cid);
     if (!t) return "";
-    if (t.hidden) return "an unseen creature (do not name it or say what it is)";
+    if (unseenByPlayers(t)) return "an unseen creature (do not name it or say what it is)";
     if (t.character_id) {
       const sheet = loadSheet(t.character_id);
       return `${t.name}, a player character${sheet ? ` (${sheet.data.species ? `${sheet.data.species} ` : ""}${classSummary(sheet.data)})`.replace(/\(\s*\)/, "") : ""}`;
@@ -665,7 +675,7 @@ export function narrationFacts(cid: number, ev: NarrationEvent): string {
   };
   const t = ev.targetId != null ? tokenOnActiveMap(Number(ev.targetId), cid) : null;
   // The same rough word players see on the map, never numbers
-  const state = t && !t.hidden && !t.character_id && (ev.kind === "hit" || ev.kind === "crit") ? healthWord(t.hp, t.max_hp) : null;
+  const state = t && !unseenByPlayers(t) && !t.character_id && (ev.kind === "hit" || ev.kind === "crit") ? healthWord(t.hp, t.max_hp) : null;
   const clean = (s: unknown, n = 60) => String(s ?? "").replace(/[\r\n]+/g, " ").slice(0, n).trim();
   return [
     "Narrate this moment of combat.",

@@ -249,7 +249,7 @@ function canMoveToken(t: Row, d: SocketData) {
 
 export function tokenOnActiveMap(tokenId: number, campaignId: number) {
   return one(
-    "SELECT t.* FROM tokens t JOIN maps m ON m.id = t.map_id WHERE t.id = ? AND m.campaign_id = ?",
+    "SELECT t.* FROM tokens t JOIN maps m ON m.id = t.map_id JOIN campaigns c ON c.id = m.campaign_id AND c.active_map_id = m.id WHERE t.id = ? AND m.campaign_id = ?",
     tokenId,
     campaignId,
   );
@@ -500,6 +500,11 @@ export function initRealtime(server: HttpServer) {
       const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
       let prevEntry: Row | undefined, prevRound = state.round;
       const sortEntries = () => state.entries.sort((a, b) => b.init - a.init || (b.dex ?? 0) - (a.dex ?? 0));
+      // Players may only tie a turn-order entry to a token they control
+      if (!d.isDM && p.tokenId != null) {
+        const own = tokenOnActiveMap(Number(p.tokenId), d.campaignId);
+        p.tokenId = own && canMoveToken(own, d) ? own.id : null;
+      }
       if (p.op === "roll") {
         // Server rolls initiative so nobody can fudge it: d20 + bonus, posted to chat too.
         const bonus = Math.max(-10, Math.min(20, Math.round(Number(p.bonus) || 0)));
@@ -536,7 +541,10 @@ export function initRealtime(server: HttpServer) {
           let newRound = false;
           if (state.turn >= state.entries.length) { state.turn = 0; state.round++; newRound = true; }
           const cur = state.entries[state.turn];
-          discordTurn(d.campaignId, state.round, cur.hidden ? null : cur.name, newRound);
+          // Hidden creatures and monsters still in the fog are never named outside the site
+          const curTok = cur.tokenId ? tokenOnActiveMap(Number(cur.tokenId), d.campaignId) : null;
+          const unseen = cur.hidden || (curTok ? !tokenVisible(curTok, false, fogOf(curTok.map_id)) : false);
+          discordTurn(d.campaignId, state.round, unseen ? null : cur.name, newRound);
         }
       } else if (p.op === "prev") {
         if (state.turn > 0) state.turn--;
