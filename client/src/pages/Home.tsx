@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { go, useLoad, useStatus } from "../hooks";
+import { activate, go, useLoad, useStatus } from "../hooks";
 import { classSummary, totalLevel } from "../../../shared/character";
 import { fmtSession } from "./Settings";
 import { ScanSheet } from "../components/ScanSheet";
@@ -30,15 +30,15 @@ export function Home() {
 
   return (
     <div className="page">
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Your campaigns</h1>
-        <button className="primary" onClick={() => setCreating(!creating)}>+ New campaign</button>
+        <button className="primary" aria-expanded={creating} onClick={() => setCreating(!creating)}>{creating ? "Close" : "+ New campaign"}</button>
       </div>
       {creating && (
         <form className="card" onSubmit={create}>
           {error && <div className="error">{error}</div>}
           <div className="row top">
-            <label className="grow">Campaign name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
+            <label className="grow">Campaign name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required autoFocus /></label>
             <label>Rules
               <select value={form.rulesVersion} onChange={(e) => setForm({ ...form, rulesVersion: e.target.value })}>
                 <option value="2014">5e (2014 rules)</option>
@@ -53,7 +53,7 @@ export function Home() {
       {campaigns.error && <div className="error">{campaigns.error}</div>}
       <div className="grid">
         {campaigns.data?.map((c) => (
-          <div key={c.id} className="card" style={{ cursor: "pointer" }} onClick={() => go(`c/${c.id}/table`)}>
+          <div key={c.id} className="card clickable" aria-label={`Open ${c.name}`} {...activate(() => go(`c/${c.id}/table`))}>
             <h2>{c.name}</h2>
             <p className="muted">{c.description || "No description yet."}</p>
             <div className="row">
@@ -63,26 +63,30 @@ export function Home() {
             {c.nextSessionAt && new Date(c.nextSessionAt) > new Date(Date.now() - 3 * 3600e3) && <p style={{ margin: "8px 0 0" }}>📅 Next session: <b>{fmtSession(c.nextSessionAt)}</b></p>}
           </div>
         ))}
-        {campaigns.data?.length === 0 && <p className="muted">You're not in any campaigns yet. Create one, or ask your DM to add you.</p>}
-      </div>
+        </div>
+      {campaigns.data?.length === 0 && <div className="empty"><b>No campaigns yet.</b><br />Press "+ New campaign" to start one, or ask your DM to send you an invite link.</div>}
 
       <hr />
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Your characters</h1>
         <button className="primary" onClick={() => setWizard(true)}>🧙 Create step by step</button>
-        <button onClick={() => setAiMaker(true)}>✨ AI makes one</button>
+      </div>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <span className="muted">Other ways to start:</span>
+        <button onClick={() => setAiMaker(true)}>✨ Let the AI make one</button>
         <button onClick={() => setScanning(true)}>📷 Import paper sheet</button>
-        <button onClick={async () => { const r = await api.post("/characters", { data: { name: "New Adventurer" } }); go(`character/${r.id}`); }}>+ New character (no campaign)</button>
+        <button onClick={async () => { const r = await api.post("/characters", { data: { name: "New Adventurer" } }); go(`character/${r.id}`); }}>+ Blank sheet</button>
       </div>
       {scanning && <ScanSheet onCancel={() => setScanning(false)} onDone={(id) => go(`character/${id}`)} />}
       {aiMaker && <AiCharacter rules="2014" onCancel={() => setAiMaker(false)} onDone={(id) => go(`character/${id}`)} />}
       {wizard && <CharacterWizard rules="2014" onCancel={() => setWizard(false)} onDone={(id) => go(`character/${id}`)} />}
-      <p className="muted">Characters you build inside a campaign need the DM's approval. You can also keep characters here and bring them into a campaign later.</p>
-      <table className="list">
+      <p className="muted">Characters made here aren't in any campaign yet. Open a campaign's Characters tab to make one for that table (the DM approves those), or bring one of these in later.</p>
+      {chars.data?.length === 0 && <div className="empty"><b>No characters yet.</b><br />Press "Create step by step" and the site walks you through it.</div>}
+      {!!chars.data?.length && <table className="list responsive">
         <thead><tr><th>Name</th><th>Class</th><th>Campaign</th><th>Status</th></tr></thead>
         <tbody>
           {chars.data?.map((c) => (
-            <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => go(`character/${c.id}`)}>
+            <tr key={c.id} className="clickable" aria-label={`Open ${c.name}`} {...activate(() => go(`character/${c.id}`))}>
               <td>{c.name}</td>
               <td>Level {totalLevel(c.data)} {classSummary(c.data)}</td>
               <td>{c.campaignName ?? <span className="muted">none</span>}</td>
@@ -90,7 +94,7 @@ export function Home() {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table>}
 
       {!!status.user?.is_admin && <Invites />}
     </div>
@@ -113,17 +117,18 @@ function Invites() {
   return (
     <>
       <hr />
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Invite players</h1>
         <button className="primary" onClick={() => setEmailing(!emailing)}>✉️ Invite by email</button>
       </div>
       <p className="muted">Send each player an invite. The link opens the sign-up page with their code filled in. Invites made for a campaign add the player to it automatically.</p>
       {emailing && <EmailInvite campaigns={(campaigns.data ?? []).filter((c) => c.isDM)} dmName={status.user!.display_name} onDone={() => { invites.reload(); }} />}
       <div className="row" style={{ marginBottom: 10 }}>
-        <label className="inline">Uses <input type="number" min={1} max={20} value={uses} onChange={(e) => setUses(Number(e.target.value))} style={{ width: 70 }} /></label>
+        <label className="inline">Uses <input type="number" aria-label="How many people can use this code" min={1} max={20} value={uses} onChange={(e) => setUses(Number(e.target.value))} style={{ width: 70 }} /></label>
         <button onClick={() => api.post("/invites", { uses }).then(invites.reload)}>Create a plain invite code</button>
       </div>
-      <table className="list">
+      {invites.data?.length === 0 && <p className="muted">No invite codes yet.</p>}
+      <table className="list responsive">
         <tbody>
           {invites.data?.map((i) => (
             <tr key={i.code}>
@@ -212,8 +217,8 @@ ${dmName}`);
           <label>Subject<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
           <label>Message<textarea rows={14} value={body} onChange={(e) => setBody(e.target.value)} /></label>
           <div className="row">
-            <a className="btn primary" href={mailto} style={{ textDecoration: "none", background: "var(--red-dark)", borderColor: "var(--red)", color: "#fff" }}>Open in my email app</a>
-            <a className="btn" target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}
+            <a className="btn primary" href={mailto}>Open in my email app</a>
+            <a className="btn" target="_blank" rel="noreferrer"
               href={`https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(list.join(","))}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`}>Open in Gmail</a>
             <button onClick={() => navigator.clipboard?.writeText(`${subject}\n\n${body}`).then(() => toast("Message copied. Paste it into an email, text or Discord."))}>Copy message</button>
             <button onClick={() => { setCode(""); setEmails(""); setNote(""); }}>Invite someone else</button>

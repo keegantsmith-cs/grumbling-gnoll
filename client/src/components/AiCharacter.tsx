@@ -16,7 +16,7 @@ export function AiCharacter({ campaignId, rules, onDone, onCancel }: { campaignI
   const [result, setResult] = useState<{ data: CharacterData; summary: string; dmCheckNotes: string } | null>(null);
   const set = (k: keyof typeof o, v: string | number) => setO({ ...o, [k]: v, ...(k === "className" ? { subclass: ANY } : {}) });
 
-  if (!status.aiEnabled) return <div className="card"><p>The AI character maker needs the AI, which isn't set up on this server yet.</p><button onClick={onCancel}>Close</button></div>;
+  if (!status.aiEnabled) return <div className="card"><p>The AI character maker isn't switched on for this site yet. Ask the DM, or use the step-by-step creator instead.</p><button onClick={onCancel}>Close</button></div>;
 
   async function rollScores() {
     try {
@@ -54,7 +54,7 @@ export function AiCharacter({ campaignId, rules, onDone, onCancel }: { campaignI
 
   return (
     <div className="card" style={{ border: "1px solid var(--gold)" }}>
-      <div className="row"><h2 className="grow" style={{ margin: 0 }}>✨ Let the AI make a character</h2><button className="small" onClick={onCancel}>Cancel</button></div>
+      <div className="row"><h2 className="grow">✨ Let the AI make a character</h2><button className="small" onClick={onCancel}>Cancel</button></div>
       {!result ? (
         <>
           <p className="muted">Choose as much or as little as you like. Anything left on "AI chooses" is picked for you. It follows the 5e {rules} rules for scores, skills, HP, gear and spells.</p>
@@ -67,7 +67,7 @@ export function AiCharacter({ campaignId, rules, onDone, onCancel }: { campaignI
           <div className="row top">
             {pick("Background", "background", backgroundsFor(rules))}
             {pick("Alignment", "alignment", ALIGNMENTS)}
-            <label>Level<input type="number" min={1} max={20} value={o.level} onChange={(e) => set("level", Math.max(1, Math.min(20, Number(e.target.value) || 1)))} style={{ width: 80 }} /></label>
+            <label>Level (1-20)<input type="number" min={1} max={20} value={o.level} onChange={(e) => set("level", Math.max(1, Math.min(20, Number(e.target.value) || 1)))} style={{ width: 80 }} /></label>
             <label>Ability scores
               <select value={o.abilityMethod} onChange={(e) => set("abilityMethod", e.target.value)} style={{ width: "auto" }}>
                 <option value="standard">Standard array (15, 14, 13, 12, 10, 8)</option>
@@ -87,6 +87,8 @@ export function AiCharacter({ campaignId, rules, onDone, onCancel }: { campaignI
               placeholder="e.g. A grumpy dwarf priest who brews holy ale and hates goblins. Good at healing, terrible at sneaking." />
           </label>
           <button className="primary" disabled={busy || (o.abilityMethod === "rolled" && !roll)} onClick={generate}>{busy ? "Creating your character... (about a minute)" : "✨ Make my character"}</button>
+          {o.abilityMethod === "rolled" && !roll && <p className="muted" style={{ marginTop: 8 }}>Roll your scores first, then the AI can build around them.</p>}
+          {busy && <p className="muted" role="status" style={{ marginTop: 8 }}>Hang tight, the AI is writing up your sheet. Please don't close this page.</p>}
         </>
       ) : (
         <>

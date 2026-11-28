@@ -173,6 +173,7 @@ function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapStat
 
   function onDown(e: Konva.KonvaEventObject<PointerEvent>) {
     const p = pointer();
+    startLongPress(e);
     if (e.evt.button === 2) return;
     if (tool === "measure") setMeasure({ a: snap(map, p.x, p.y), b: snap(map, p.x, p.y) });
     else if (tool === "ping" || (e.evt.altKey && tool === "select")) live.socket?.emit("ping", p);
@@ -180,7 +181,8 @@ function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapStat
     else if (tool === "revealRect" || tool === "hideRect") setDraft({ mode: tool === "hideRect" ? "hide" : "reveal", kind: "rect", x: p.x, y: p.y, w: 0, h: 0, r: 0 });
     else if (e.target === e.target.getStage() || e.target.name() === "bg") setSelected(null);
   }
-  function onMove() {
+  function onMove(e?: Konva.KonvaEventObject<PointerEvent>) {
+    if (longPress.current.timer && e && Math.hypot(e.evt.clientX - longPress.current.x, e.evt.clientY - longPress.current.y) > 10) cancelLongPress();
     const p = pointer();
     if (measure && tool === "measure") setMeasure({ ...measure, b: snap(map, p.x, p.y) });
     if (draft?.kind === "poly") {
@@ -190,6 +192,7 @@ function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapStat
     } else if (draft?.kind === "rect") setDraft({ ...draft, w: p.x - draft.x, h: p.y - draft.y });
   }
   function onUp() {
+    cancelLongPress();
     if (draft) {
       let shape = draft;
       if (shape.kind === "rect") shape = { ...shape, x: Math.min(shape.x, shape.x + shape.w), y: Math.min(shape.y, shape.y + shape.h), w: Math.abs(shape.w), h: Math.abs(shape.h) };
@@ -215,17 +218,47 @@ function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapStat
     return () => window.removeEventListener("gnoll-encounter", open);
   }, []);
 
-  function onContext(e: Konva.KonvaEventObject<PointerEvent>) {
-    e.evt.preventDefault();
-    const stagePos = e.target.getStage()!.getPointerPosition()!;
-    let node: Konva.Node | null = e.target;
+  function openMenuFor(target: Konva.Node, stagePos: { x: number; y: number }) {
+    let node: Konva.Node | null = target;
     let tokenId: number | undefined;
     while (node) {
       const m = node.name()?.match(/^token-(\d+)$/);
       if (m) { tokenId = Number(m[1]); break; }
       node = node.getParent();
     }
-    setMenu({ sx: stagePos.x, sy: stagePos.y, p: snap(map, pointer().x, pointer().y), tokenId });
+    const p = snap(map, (stagePos.x - view.x) / view.scale, (stagePos.y - view.y) / view.scale);
+    setMenu({ sx: stagePos.x, sy: stagePos.y, p, tokenId });
+  }
+  function onContext(e: Konva.KonvaEventObject<PointerEvent>) {
+    e.evt.preventDefault();
+    // A touch long-press can also fire a contextmenu event; the long-press timer already handled it
+    if (longPress.current.fired) return;
+    openMenuFor(e.target, e.target.getStage()!.getPointerPosition()!);
+  }
+  // Touch screens have no right-click: holding a finger still on the map (or a token) opens the same menu
+  const longPress = useRef<{ timer: number | null; x: number; y: number; fired: boolean }>({ timer: null, x: 0, y: 0, fired: false });
+  function cancelLongPress() {
+    if (longPress.current.timer) window.clearTimeout(longPress.current.timer);
+    longPress.current.timer = null;
+  }
+  function startLongPress(e: Konva.KonvaEventObject<PointerEvent>) {
+    cancelLongPress();
+    longPress.current.fired = false;
+    if (e.evt.pointerType !== "touch" || tool !== "select") return;
+    const stage = e.target.getStage()!;
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    const target = e.target;
+    longPress.current.x = e.evt.clientX;
+    longPress.current.y = e.evt.clientY;
+    longPress.current.timer = window.setTimeout(() => {
+      longPress.current.timer = null;
+      longPress.current.fired = true;
+      if (navigator.vibrate) navigator.vibrate(15);
+      stage.stopDrag?.();
+      target.stopDrag?.();
+      openMenuFor(target, pos);
+    }, 550);
   }
   const stageDraggable = tool === "select";
 
@@ -261,7 +294,7 @@ function Board({ map, campaign, live, onFocusToken, openCombat }: { map: MapStat
       {!isDM && map.fogEnabled && !map.fog.some((f) => f.mode === "reveal") && (
         <div className="board-notice" role="status"><b>Shrouded in fog</b>Your DM will reveal the map as you explore. Chat and dice work as usual.</div>
       )}
-      <div className="board-hint">{tool === "select" ? (touch ? <>Drag to pan · tap a token to edit it · </> : <>Scroll to zoom · drag to pan · right-click for more · </>) : null}{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
+      <div className="board-hint">{tool === "select" ? (touch ? <>Drag to pan · tap a token to edit it · hold a finger down for more · </> : <>Scroll to zoom · drag to pan · right-click for more · </>) : null}{map.name} · {map.gridType === "hex" ? "hex" : map.gridType === "square" ? "square" : "no"} grid · {map.feetPerCell} ft per {map.gridType === "hex" ? "hex" : "square"}</div>
 
       <div className="zoom-btns" role="group" aria-label="Zoom">
         <button onClick={() => zoomBy(1.25)} aria-label="Zoom in" title="Zoom in">+</button>

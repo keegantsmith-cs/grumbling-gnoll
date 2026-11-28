@@ -24,20 +24,23 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
     finally { setBusy(false); }
   }
   const show = async (mapId: number | null) => {
-    await api.post(`/campaigns/${campaign.id}/active-map`, { mapId });
-    onChange();
-    if (mapId) go(`c/${campaign.id}/table`);
+    try {
+      await api.post(`/campaigns/${campaign.id}/active-map`, { mapId });
+      onChange();
+      if (mapId) go(`c/${campaign.id}/table`);
+    } catch (e) { toast((e as Error).message); }
   };
   const activeId = live.map?.id ?? null;
 
   return (
     <div>
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Maps</h1>
-        <button onClick={() => setMode("upload")}>⬆ Upload a map</button>
+        <button className="primary" onClick={() => setMode("upload")}>⬆ Upload a map</button>
         <button onClick={() => setMode("generate")}>🎲 Random dungeon/cave</button>
         <button onClick={() => setMode("ai")} disabled={!status.aiEnabled} title={status.aiEnabled ? "" : "AI isn't set up on the server"}>🧙 AI-designed map</button>
       </div>
+      <p className="muted">Pick a map to show your players, or add a new one. {!status.aiEnabled && "(AI-designed maps need the AI to be set up first.)"}</p>
       {error && <div className="error">{error}</div>}
 
       {mode === "upload" && (
@@ -55,9 +58,9 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
           <div className="row">
             <label className="grow">Name<input value={up.name} onChange={(e) => setUp({ ...up, name: e.target.value })} /></label>
             <GridPicker value={up.gridType} onChange={(gridType) => setUp({ ...up, gridType })} />
-            <label>Pixels per square<input type="number" value={up.gridSize} onChange={(e) => setUp({ ...up, gridSize: Number(e.target.value) })} style={{ width: 90 }} /></label>
+            <label>Pixels per square<input type="number" min={10} value={up.gridSize} onChange={(e) => setUp({ ...up, gridSize: Number(e.target.value) })} style={{ width: 90 }} /></label>
           </div>
-          <button className="primary" disabled={busy}>{busy ? "Uploading..." : "Upload"}</button> <button type="button" onClick={() => setMode(null)}>Cancel</button>
+          <div className="row"><button className="primary" disabled={busy}>{busy ? "Uploading..." : "Upload"}</button><button type="button" onClick={() => setMode(null)}>Cancel</button></div>
         </form>
       )}
 
@@ -76,7 +79,7 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
             <GridPicker value={gen.gridType} onChange={(gridType) => setGen({ ...gen, gridType })} />
           </div>
           <p className="muted">Doors are brown, locked doors have a gold dot, and secret doors (purple "S") only show for you.</p>
-          <button className="primary" disabled={busy}>Generate</button> <button type="button" onClick={() => setMode(null)}>Cancel</button>
+          <div className="row"><button className="primary" disabled={busy}>{busy ? "Drawing..." : "Generate"}</button><button type="button" onClick={() => setMode(null)}>Cancel</button></div>
         </form>
       )}
 
@@ -91,21 +94,22 @@ export function MapsTab({ campaign, live, onChange }: { campaign: Campaign; live
             <label>Height<input type="number" min={12} max={80} value={ai.rows} onChange={(e) => setAi({ ...ai, rows: Number(e.target.value) })} style={{ width: 80 }} /></label>
             <GridPicker value={ai.gridType} onChange={(gridType) => setAi({ ...ai, gridType })} />
           </div>
-          <button className="primary" disabled={busy}>{busy ? "Designing... ✨" : "Design it"}</button> <button type="button" onClick={() => setMode(null)}>Cancel</button>
+          <div className="row"><button className="primary" disabled={busy}>{busy ? "Designing... ✨" : "Design it"}</button><button type="button" onClick={() => setMode(null)}>Cancel</button></div>
         </form>
       )}
 
-      {maps.data && maps.data.length > 0 && <table className="list">
+      {maps.data && maps.data.length > 0 && <table className="list responsive">
         <thead><tr><th>Map</th><th>Grid</th><th>Fog</th><th></th></tr></thead>
         <tbody>
           {maps.data?.map((m) => <MapRow key={m.id} m={m} active={m.id === activeId} show={show} reload={maps.reload} toast={toast} />)}
         </tbody>
       </table>}
       {maps.data?.length === 0 && !mode && <div className="empty"><b>No maps yet.</b><br />Upload a picture of a map, or let the site draw a random dungeon for you, using the buttons above.</div>}
-      {activeId && <button style={{ marginTop: 10 }} onClick={() => show(null)}>Take the map off the table</button>}
+      {activeId && <button style={{ marginTop: 12 }} onClick={() => show(null)}>Take the map off the table</button>}
       {advMaps.data && advMaps.data.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>📚 Maps from your adventures</h2>
+          <p className="muted" style={{ fontSize: 13 }}>Pictures the AI found in your adventure PDFs. Add one to your Maps to use it at the table.</p>
           <AdventureMaps campaignId={campaign.id} maps={advMaps.data} reload={() => { advMaps.reload(); maps.reload(); }} showAdventure />
         </div>
       )}
@@ -130,28 +134,35 @@ function MapRow({ m, active, show, reload, toast }: { m: any; active: boolean; s
   return (
     <>
       <tr>
-        <td>{m.name} {active && <span className="pill ok">on the table</span>}<div className="muted" style={{ fontSize: 12 }}>{m.generated ? "Generated" : "Uploaded"} · {m.width}×{m.height}px</div></td>
-        <td>{m.gridType}{m.gridType !== "none" ? ` · ${m.gridSize}px` : ""}</td>
+        <td>
+          <div className="map-name">
+            {m.imageUrl ? <img className="map-thumb" src={m.imageUrl} alt={`Preview of ${m.name}`} loading="lazy" decoding="async" /> : <span className="map-thumb placeholder" aria-hidden="true">{m.generated ? "🎲" : "🗺️"}</span>}
+            <div><b>{m.name}</b> {active && <span className="pill ok">on the table</span>}<div className="muted" style={{ fontSize: 12 }}>{m.generated ? "Generated" : "Uploaded"} · {m.width}×{m.height}px</div></div>
+          </div>
+        </td>
+        <td>{{ square: "Squares", hex: "Hexes", none: "No grid" }[m.gridType as string] ?? m.gridType}{m.gridType !== "none" ? ` · ${m.gridSize}px` : ""}</td>
         <td>{m.fogEnabled ? "On" : "Off"}</td>
         <td style={{ textAlign: "right" }}>
-          <button className="primary small" onClick={() => show(m.id)}>{active ? "Open table" : "Show to players"}</button>{" "}
-          {m.imageUrl && status.aiEnabled && <button className="small" onClick={() => setEnrich(!enrich)} title="AI reads the map and writes a room key, markers and encounter ideas">✨ Enrich</button>}{" "}
-          <button className="small" onClick={() => setEdit(!edit)}>Settings</button>{" "}
-          <button className="small danger" onClick={async () => { if (confirm(`Delete ${m.name}?`)) { await api.del(`/maps/${m.id}`); reload(); } }}>Delete</button>
+          <div className="btn-group">
+          <button className="primary small" onClick={() => show(m.id)}>{active ? "Open table" : "Show to players"}</button>
+          {m.imageUrl && status.aiEnabled && <button className="small" onClick={() => setEnrich(!enrich)} title="AI reads the map and writes a room key, markers and encounter ideas">✨ Enrich</button>}
+          <button className="small" aria-expanded={edit} aria-label={`Settings for ${m.name}`} onClick={() => setEdit(!edit)}>Settings</button>
+          <button className="small danger" aria-label={`Delete ${m.name}`} onClick={async () => { if (confirm(`Delete "${m.name}"? This can't be undone.`)) { try { await api.del(`/maps/${m.id}`); reload(); } catch (e) { toast((e as Error).message); } } }}>Delete</button>
+          </div>
         </td>
       </tr>
-      {enrich && <tr><td colSpan={4}><EnrichPanel m={m} done={() => { setEnrich(false); reload(); }} /></td></tr>}
+      {enrich && <tr><td colSpan={4} className="panel-cell"><EnrichPanel m={m} done={() => { setEnrich(false); reload(); }} /></td></tr>}
       {edit && (
         <tr><td colSpan={4}>
-          <div className="row">
-            <label className="grow">Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <div className="row top map-settings">
+            <label className="grow name-box">Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
             <GridPicker value={f.gridType} onChange={(gridType) => setF({ ...f, gridType })} />
             <label>Square size (px)<input type="number" value={f.gridSize} onChange={(e) => setF({ ...f, gridSize: Number(e.target.value) })} style={{ width: 80 }} /></label>
             <label>Shift grid X<input type="number" value={f.gridOffsetX} onChange={(e) => setF({ ...f, gridOffsetX: Number(e.target.value) })} style={{ width: 70 }} /></label>
             <label>Shift grid Y<input type="number" value={f.gridOffsetY} onChange={(e) => setF({ ...f, gridOffsetY: Number(e.target.value) })} style={{ width: 70 }} /></label>
             <label>Feet per square<input type="number" value={f.feetPerCell} onChange={(e) => setF({ ...f, feetPerCell: Number(e.target.value) })} style={{ width: 70 }} /></label>
-            <label className="inline"><input type="checkbox" checked={f.fogEnabled} onChange={(e) => setF({ ...f, fogEnabled: e.target.checked })} /> Fog of war</label>
-            <button className="primary" onClick={save}>Save</button>
+            <label className="inline" style={{ marginTop: 24 }}><input type="checkbox" checked={f.fogEnabled} onChange={(e) => setF({ ...f, fogEnabled: e.target.checked })} /> Fog of war</label>
+            <button className="primary" style={{ marginTop: 20 }} onClick={save}>Save</button>
           </div>
           <p className="muted" style={{ fontSize: 12 }}>Tip: show the map, then adjust square size and shift until the drawn grid lines up with the picture.</p>
         </td></tr>

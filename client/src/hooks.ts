@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type KeyboardEvent } from "react";
 import { api } from "./api";
 
 export interface User { id: number; username: string; display_name: string; is_admin: number; dice_style?: string }
@@ -37,3 +37,15 @@ export function useRoute() {
   return hash.replace(/^#\/?/, "").split("/").filter(Boolean);
 }
 export const go = (path: string) => { location.hash = "#/" + path; };
+
+/** Props that make a clickable card or table row work with the keyboard too (Tab, then Enter or Space). */
+export function activate(fn: () => void) {
+  return {
+    tabIndex: 0,
+    role: "link" as const,
+    onClick: fn,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); fn(); }
+    },
+  };
+}
