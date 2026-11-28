@@ -572,7 +572,7 @@ function handleRoll(d: SocketData, p: any) {
         kind: "damage", actor: who, action: a.name, crit, total: dmg.total, parts: dmg.parts, targets: targets.map((x) => ({ id: x.id, name: x.name })),
         ...(targets.length ? { apply: { tokenIds: targets.map((x) => x.id), parts: dmg.parts, magical: !!a.magical, crit, source: `${who}'s ${a.name}` } } : {}),
       };
-      base({ total: dmg.total, detail: dmg.detail, expression: crit ? "damage (critical hit: dice doubled)" : "damage", dice: dmg.dice }, `${who}: ${a.name} damage${crit ? " (critical!)" : ""}`, combat);
+      base({ total: dmg.total, detail: dmg.detail, expression: crit ? "dice doubled for the critical hit" : "dice", dice: dmg.dice }, `${who}: ${a.name} damage${crit ? " (critical!)" : ""}`, combat);
       return { ok: true, total: dmg.total, parts: dmg.parts, crit };
     }
 

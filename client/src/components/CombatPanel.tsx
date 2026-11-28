@@ -120,10 +120,12 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
     withOwnDice(`${a.name} damage`, [{ key: "dmg", label: `${a.name}: total damage${crit ? " (critical: dice doubled)" : ""}`, hint: "dice plus bonuses" }], (v) =>
       doRoll({ kind: "damage", actionId: a.id, crit, manual: nums(v.dmg), slot: slotFor(a) }, (r) => setLast({ text: `${r.total} damage${r.parts?.length ? ` (${r.parts.map((p: any) => `${p.amount} ${p.type}`.trim()).join(" + ")})` : ""}${crit ? " — critical!" : ""}`, tone: crit ? "crit" : "plain" })));
   }
+  /** Typed dice only make sense for creatures this person controls: nobody types a result for the DM's monsters or another player's character. */
+  const typeable = (id: number) => campaign.isDM || mine.some((t) => t.id === id);
   function saveAll(a: CombatAction) {
     if (!targets.length) { toast("Pick who it hits first (Targets, above)"); return; }
-    const fields = [...(a.damage?.length ? [{ key: "dmg", label: `${a.name}: total damage`, hint: "rolled once for everyone" }] : []), ...targets.map((id) => ({ key: `s${id}`, label: `${targetName(id)}: save d20`, hint: `DC ${a.save!.dc} ${a.save!.ability.toUpperCase()}; blank = the site rolls` }))];
-    withOwnDice(`${a.name}: saving throws`, fields, (v) => doRoll({ kind: "saveall", actionId: a.id, manualDamage: nums(v.dmg), manualSaves: Object.fromEntries(targets.map((id) => [id, nums(v[`s${id}`])]).filter(([, n]) => n !== undefined)), slot: slotFor(a), useSlot: slotFor(a) > 0 }, (r) => {
+    const fields = [...(a.damage?.length ? [{ key: "dmg", label: `${a.name}: total damage`, hint: "rolled once for everyone" }] : []), ...targets.filter((id) => typeable(id)).map((id) => ({ key: `s${id}`, label: `${targetName(id)}: save d20`, hint: `DC ${a.save!.dc} ${a.save!.ability.toUpperCase()}; blank = the site rolls` }))];
+    withOwnDice(`${a.name}: saving throws`, fields, (v) => doRoll({ kind: "saveall", actionId: a.id, manualDamage: nums(v.dmg), manualSaves: Object.fromEntries(targets.filter((id) => typeable(id)).map((id) => [id, nums(v[`s${id}`])]).filter(([, n]) => n !== undefined)), slot: slotFor(a), useSlot: slotFor(a) > 0 }, (r) => {
       const lines = (r.rows as any[]).map((x) => `${x.name} ${x.success ? "✓" : "✗"}`).join(", ");
       setLast({ text: `DC ${a.save!.dc} ${a.save!.ability.toUpperCase()}: ${lines}${r.total != null ? ` — ${r.total} damage${a.save!.half ? " (half on a save)" : ""}` : ""}`, tone: "plain" });
     }));
@@ -215,7 +217,7 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
         <>
           <Summary t={token} actor={actor} isDM={campaign.isDM} emit={emit}
             onDeath={() => withOwnDice("Death saving throw", [{ key: "d20", label: "Death save: what did your d20 show?" }], (v) => emit("combat:death", { tokenId: token.id, manual: nums(v.d20) }, (r) => setLast({ text: r.text + ` (${r.successes} successes, ${r.failures} failures)`, tone: r.outcome === "failure" || r.outcome === "dead" ? "bad" : "good" })))}
-            onConc={(dc) => doRoll({ kind: "save", ability: "con", dc, concentration: true }, (r) => setLast({ text: `Concentration save: ${r.total} vs DC ${dc} — ${r.success ? "kept" : `lost${r.dropped ? ` ${r.dropped}` : ""}`}`, tone: r.success ? "good" : "bad" }))} />
+            onConc={(dc) => withOwnDice("Concentration save", [{ key: "d20", label: "Constitution save: what did your d20 show?" }], (v) => doRoll({ kind: "save", ability: "con", dc, concentration: true, manual: nums(v.d20) }, (r) => setLast({ text: `Concentration save: ${r.total} vs DC ${dc} — ${r.success ? "kept" : `lost${r.dropped ? ` ${r.dropped}` : ""}`}`, tone: r.success ? "good" : "bad" })))} />
           {actor.notes.map((n, i) => <p key={i} className="muted" style={{ fontSize: 12 }}>{n}</p>)}
 
           <div className="roll-controls">

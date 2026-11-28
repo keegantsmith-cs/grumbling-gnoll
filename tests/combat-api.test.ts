@@ -456,3 +456,13 @@ test("narration: the AI is only given facts players already know (no hidden mons
     ai.setAIClientForTests(null);
   }
 });
+
+test("dropping the same monster twice keeps numbering instead of repeating names", async () => {
+  const gob = (await dm.get("/srd/monster/Giant%20Rat")).data;
+  const drop = (count: number, x: number) => dm.post(`/campaigns/${campaignId}/table/monsters`, { monster: gob, count, initiative: "none", x, y: 700});
+  await drop(2, 100); await drop(2, 400); await drop(1, 700);
+  const D = await live(dm);
+  const names = (D.last("map")?.tokens ?? []).map((t: any) => t.name).filter((n: string) => n.startsWith("Giant Rat")).sort();
+  D.s.close();
+  assert.deepEqual(names, ["Giant Rat 1", "Giant Rat 2", "Giant Rat 3", "Giant Rat 4", "Giant Rat 5"]);
+});

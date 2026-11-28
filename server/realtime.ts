@@ -595,6 +595,9 @@ export function addMonsterTokens(campaignId: number, userId: number, m: MonsterD
   const y0 = m.y ?? map.height / 2;
   const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
   const dex = Math.round(m.dexMod ?? 0);
+  // Dropping the same monster again carries on the numbering (Goblin 4, Goblin 5) so every token has its own name
+  const same = (all("SELECT name FROM tokens WHERE map_id = ?", map.id) as Row[]).map((t) => String(t.name).match(new RegExp(`^${m.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?: (\\d+))?$`))).filter(Boolean) as RegExpMatchArray[];
+  const firstNumber = same.length ? Math.max(1, ...same.map((x) => Number(x[1]) || 0)) + 1 : 1;
   const groupInit = m.initiative === "group" ? rollDice(`1d20${dex >= 0 ? "+" : ""}${dex}`).total : null;
   const dmId = dmIdOf(campaignId);
   for (let i = 0; i < count; i++) {
@@ -602,7 +605,7 @@ export function addMonsterTokens(campaignId: number, userId: number, m: MonsterD
     if (m.rollHp && m.hitDice && /^\d+d\d+([+-]\d+)?$/.test(m.hitDice.replace(/\s/g, ""))) {
       try { hp = Math.max(1, rollDice(m.hitDice.replace(/\s/g, "")).total); } catch { /* keep the average */ }
     }
-    const name = count > 1 ? `${m.name} ${i + 1}` : m.name;
+    const name = count > 1 || same.length ? `${m.name} ${firstNumber + i}` : m.name;
     // line each token up with the grid
     const snapTo = (v: number, off: number) => (Math.round(size) % 2 === 0 ? Math.round((v - off) / g) * g + off : Math.floor((v - off) / g) * g + off + g / 2);
     const x = snapTo(x0 + (i % perRow) * step, map.grid_offset_x || 0), y = snapTo(y0 + Math.floor(i / perRow) * step, map.grid_offset_y || 0);
