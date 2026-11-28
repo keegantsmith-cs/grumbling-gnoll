@@ -326,3 +326,30 @@ CREATE TABLE IF NOT EXISTS encounters (
 addColumn("campaigns", "dm_notes_backup", "TEXT NOT NULL DEFAULT ''");
 addColumn("maps", "pois", "TEXT NOT NULL DEFAULT '[]'"); // points of interest from the AI (or the DM)
 addColumn("maps", "enrichment", "TEXT NOT NULL DEFAULT '{}'"); // encounter ideas, grid estimate, atmosphere
+
+// DM-only notes as separate entries (one secret, plot hook or reminder per note)
+db.exec(`
+CREATE TABLE IF NOT EXISTS character_dm_note_items (
+  id INTEGER PRIMARY KEY,
+  character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_dm_note_items ON character_dm_note_items(character_id);
+`);
+// Move notes from the old single box into the list (once)
+for (const r of db.prepare("SELECT character_id, notes FROM character_dm_notes WHERE trim(notes) != ''").all() as { character_id: number; notes: string }[]) {
+  const has = db.prepare("SELECT 1 FROM character_dm_note_items WHERE character_id = ?").get(r.character_id);
+  if (!has) db.prepare("INSERT INTO character_dm_note_items (character_id, text) VALUES (?, ?)").run(r.character_id, r.notes);
+  db.prepare("UPDATE character_dm_notes SET notes = '' WHERE character_id = ?").run(r.character_id);
+}
+
+/** All of a character's DM-only notes as one block of text (pinned first), for the DM's AI. */
+export function dmNotesText(characterId: number): string {
+  return (db.prepare("SELECT text FROM character_dm_note_items WHERE character_id = ? ORDER BY pinned DESC, id").all(characterId) as { text: string }[])
+    .map((n) => n.text.trim()).filter(Boolean).join("\n");
+}
+
+addColumn("character_suggestions", "edited_at", "TEXT");

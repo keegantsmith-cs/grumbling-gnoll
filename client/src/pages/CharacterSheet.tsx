@@ -83,7 +83,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
       {!c.pending && c.lastReview?.status === "rejected" && <div className="error">The DM sent back your last changes{c.lastReview.dmComment ? `: "${c.lastReview.dmComment}"` : "."}</div>}
       {c.lastReview?.status === "approved" && c.lastReview.dmComment && !c.pending && <div className="notice">DM's note on your last approval: "{c.lastReview.dmComment}"</div>}
       {msg && <div className="notice">{msg}</div>}
-      {c.isDM && c.campaignId && <DmSecretNotes id={id} initial={c.dmNotes ?? ""} name={d.name} />}
+      {c.isDM && c.campaignId && <DmSecretNotes id={id} initial={c.dmNoteItems ?? []} name={d.name} />}
       {(c.ownerId === status.user?.id || c.isDM) && <Suggestions id={id} name={d.name} isDM={c.isDM} isOwner={c.ownerId === status.user?.id} />}
 
       <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: 0 }}>
@@ -438,33 +438,62 @@ function InventoryEditor({ d, dv, upd }: { d: CharacterData; dv: ReturnType<type
   );
 }
 
-/** Notes only the campaign's DM (and the DM's AI assistant) can see. */
-function DmSecretNotes({ id, initial, name }: { id: number; initial: string; name: string }) {
+/** Notes only the campaign's DM (and the DM's AI assistant) can see: one secret, plot hook or reminder per note. */
+function DmSecretNotes({ id, initial, name }: { id: number; initial: any[]; name: string }) {
   const { toast } = useStatus();
-  const [notes, setNotes] = useState(initial);
-  const [saved, setSaved] = useState(initial);
-  const [open, setOpen] = useState(!!initial);
-  useEffect(() => { setNotes(initial); setSaved(initial); }, [initial]);
-  const save = async () => {
-    if (notes === saved) return;
-    try { await api.put(`/characters/${id}/dm-notes`, { notes }); setSaved(notes); toast("DM notes saved"); }
-    catch (e) { toast((e as Error).message); }
+  const [notes, setNotes] = useState<any[]>(initial);
+  const [open, setOpen] = useState(initial.length > 0);
+  const [text, setText] = useState("");
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  useEffect(() => setNotes(initial), [initial]);
+  const reload = async () => {
+    try { const c = await api.get<any>(`/characters/${id}`); setNotes(c.dmNoteItems ?? []); } catch (e) { toast((e as Error).message); }
   };
+  const act = async (fn: () => Promise<unknown>, done?: string) => {
+    try { await fn(); await reload(); if (done) toast(done); } catch (e) { toast((e as Error).message); }
+  };
+  const add = () => act(async () => { await api.post(`/characters/${id}/dm-notes/items`, { text }); setText(""); }, "Note added");
+  const saveEdit = (nid: number) => act(async () => { await api.patch(`/character-dm-notes/${nid}`, { text: draft }); setEditing(null); }, "Note saved");
+  const remove = (n: any) => { if (confirm("Delete this note?")) act(() => api.del(`/character-dm-notes/${n.id}`)); };
   return (
     <div className="card" style={{ border: "1px dashed #8a6fb0", background: "#221a2a" }}>
       <div className="row">
-        <button type="button" className="link grow" style={{ textDecoration: "none", color: "var(--text)", fontWeight: 700, textAlign: "left" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 🔒 DM-only notes</button>
+        <button type="button" className="link grow" style={{ textDecoration: "none", color: "var(--text)", fontWeight: 700, textAlign: "left" }} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} 🔒 DM-only notes {notes.length > 0 && <span className="badge">{notes.length}</span>}</button>
         <span className="muted" style={{ fontSize: 12 }}>Only you and your AI assistant see this. {name}'s player never does.</span>
       </div>
       {open && (
-        <>
-          <textarea rows={5} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={save} style={{ marginTop: 8 }}
-            placeholder={`Secrets and plans for ${name}: "Their missing sister is the cult leader." "Owes the thieves' guild 300 gp." "Cursed sword: reveal at level 5." Plot hooks, rulings, reminders...`} />
-          <div className="row">
-            <button className="small primary" disabled={notes === saved} onClick={save}>Save</button>
-            <span className="muted" style={{ fontSize: 12 }}>The AI assistant uses these when you ask for hooks, NPCs or encounters, but they never appear in PDFs, exports or anything players see.</span>
+        <div style={{ marginTop: 8 }}>
+          <div className="row" style={{ alignItems: "flex-start", marginBottom: 10 }}>
+            <textarea className="grow" rows={2} value={text} onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && text.trim()) add(); }}
+              placeholder={`New note about ${name}: "Their missing sister is the cult leader." "Owes the thieves' guild 300 gp." "Cursed sword: reveal at level 5."`} />
+            <button className="primary" disabled={!text.trim()} onClick={add}>+ Add note</button>
           </div>
-        </>
+          {notes.length === 0 && <p className="muted">No notes yet. Add one secret, plot hook or reminder at a time.</p>}
+          {notes.map((n) => (
+            <div key={n.id} style={{ borderLeft: `3px solid ${n.pinned ? "var(--gold)" : "#8a6fb0"}`, padding: "4px 0 6px 10px", marginBottom: 8 }}>
+              <div className="row">
+                {n.pinned && <span className="pill warn">📌 pinned</span>}
+                <span className="muted" style={{ fontSize: 12 }}>{n.createdAt}{n.updatedAt !== n.createdAt ? ` · edited ${n.updatedAt}` : ""}</span>
+                <span className="right" />
+                <button className="small" title={n.pinned ? "Unpin" : "Pin to the top"} onClick={() => act(() => api.patch(`/character-dm-notes/${n.id}`, { pinned: !n.pinned }))}>{n.pinned ? "Unpin" : "📌 Pin"}</button>
+                {editing !== n.id && <button className="small" onClick={() => { setEditing(n.id); setDraft(n.text); }}>✎ Edit</button>}
+                <button className="small danger" title="Delete note" onClick={() => remove(n)}>✕</button>
+              </div>
+              {editing === n.id ? (
+                <>
+                  <textarea rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
+                  <div className="row">
+                    <button className="small primary" disabled={!draft.trim() || draft === n.text} onClick={() => saveEdit(n.id)}>Save</button>
+                    <button className="small" onClick={() => setEditing(null)}>Cancel</button>
+                  </div>
+                </>
+              ) : <div style={{ whiteSpace: "pre-wrap" }}>{n.text}</div>}
+            </div>
+          ))}
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The AI assistant uses these when you ask for hooks, NPCs or encounters (pinned notes first), but they never appear in PDFs, exports or anything players see.</p>
+        </div>
       )}
     </div>
   );
@@ -576,6 +605,11 @@ function Suggestions({ id, name, isDM, isOwner }: { id: number; name: string; is
     try { await api.post(`/characters/${id}/suggestions/ai`, { focus }); setFocus(""); reload(); } catch (e) { toast((e as Error).message); }
     finally { setBusy(false); }
   };
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const saveEdit = async (sid: number) => {
+    try { await api.patch(`/character-suggestions/${sid}`, { text: draft }); setEditing(null); reload(); toast("Suggestion updated"); } catch (e) { toast((e as Error).message); }
+  };
   const who = (s: any) => (s.authorKind === "ai" ? "🧙 AI assistant" : s.authorKind === "dm" ? `🎲 ${s.authorName} (DM)` : `🧝 ${s.authorName}`);
 
   return (
@@ -604,11 +638,20 @@ function Suggestions({ id, name, isDM, isOwner }: { id: number; name: string; is
             <div key={s.id} style={{ borderLeft: `3px solid ${s.authorKind === "ai" ? "var(--gold)" : s.authorKind === "dm" ? "var(--red)" : "var(--green)"}`, padding: "4px 0 6px 10px", marginBottom: 8, opacity: s.resolved ? 0.55 : 1 }}>
               <div className="row">
                 <b style={{ fontSize: 13 }}>{who(s)}</b>
-                <span className="muted" style={{ fontSize: 12 }}>{s.createdAt}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{s.createdAt}{s.editedAt ? ` · edited ${s.editedAt}` : ""}</span>
                 <label className="inline right" style={{ fontSize: 12 }}><input type="checkbox" checked={s.resolved} onChange={(e) => api.patch(`/character-suggestions/${s.id}`, { resolved: e.target.checked }).then(reload)} /> Done</label>
-                {(isDM || s.authorId === status.user?.id) && <button className="small danger" onClick={() => api.del(`/character-suggestions/${s.id}`).then(reload)}>✕</button>}
+                {(isDM || s.authorId === status.user?.id) && editing !== s.id && <button className="small" onClick={() => { setEditing(s.id); setDraft(s.text); }}>✎ Edit</button>}
+                {(isDM || s.authorId === status.user?.id) && <button className="small danger" title="Delete suggestion" onClick={() => confirm("Delete this suggestion?") && api.del(`/character-suggestions/${s.id}`).then(reload)}>✕</button>}
               </div>
-              {s.authorKind === "ai" ? <Markdown text={s.text} /> : <div style={{ whiteSpace: "pre-wrap" }}>{s.text}</div>}
+              {editing === s.id ? (
+                <>
+                  <textarea rows={Math.min(12, Math.max(3, s.text.split("\n").length + 1))} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus />
+                  <div className="row">
+                    <button className="small primary" disabled={!draft.trim() || draft === s.text} onClick={() => saveEdit(s.id)}>Save</button>
+                    <button className="small" onClick={() => setEditing(null)}>Cancel</button>
+                  </div>
+                </>
+              ) : s.authorKind === "ai" ? <Markdown text={s.text} /> : <div style={{ whiteSpace: "pre-wrap" }}>{s.text}</div>}
             </div>
           ))}
         </div>

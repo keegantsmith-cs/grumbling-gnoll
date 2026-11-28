@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { all, one, parseJSON, run, type Row } from "../db.ts";
+import { all, one, parseJSON, run, type Row, dmNotesText } from "../db.ts";
 import { campaignRole, requireUser } from "../auth.ts";
 import { campaignAccess, HttpError, num, publicCampaignContext, sheetUpload } from "../helpers.ts";
 import { notify, broadcastMap, postChat } from "../realtime.ts";
@@ -42,7 +42,10 @@ function characterOut(c: Row, viewerId: number) {
     canEdit: isOwner || isDM,
     isDM,
     // Secret DM notes go only to this campaign's DM
-    dmNotes: isDM ? one("SELECT notes FROM character_dm_notes WHERE character_id = ?", c.id)?.notes ?? "" : undefined,
+    dmNotes: isDM ? dmNotesText(c.id) : undefined,
+    dmNoteItems: isDM
+      ? all("SELECT id, text, pinned, created_at AS createdAt, updated_at AS updatedAt FROM character_dm_note_items WHERE character_id = ? ORDER BY pinned DESC, id DESC", c.id).map((n) => ({ ...n, pinned: !!n.pinned }))
+      : undefined,
   };
 }
 
@@ -448,7 +451,7 @@ function suggestionAccess(characterId: number, userId: number) {
   if (!isOwner && !isDM) throw new HttpError(404, "Character not found");
   return { c, isOwner, isDM };
 }
-const suggestionOut = (s: Row) => ({ id: s.id, authorKind: s.author_kind, authorName: s.author_name ?? (s.author_kind === "ai" ? "AI assistant" : "?"), text: s.text, resolved: !!s.resolved, createdAt: s.created_at, authorId: s.author_id });
+const suggestionOut = (s: Row) => ({ id: s.id, authorKind: s.author_kind, authorName: s.author_name ?? (s.author_kind === "ai" ? "AI assistant" : "?"), text: s.text, resolved: !!s.resolved, createdAt: s.created_at, editedAt: s.edited_at ?? null, authorId: s.author_id });
 
 characterRoutes.get("/characters/:id/suggestions", (req, res) => {
   const { c } = suggestionAccess(num(req.params.id), req.user!.id);
@@ -486,7 +489,14 @@ characterRoutes.post("/characters/:id/suggestions/ai", async (req, res) => {
 characterRoutes.patch("/character-suggestions/:sid", (req, res) => {
   const s = one("SELECT * FROM character_suggestions WHERE id = ?", num(req.params.sid));
   if (!s) throw new HttpError(404, "Not found");
-  suggestionAccess(s.character_id, req.user!.id);
+  const { isDM } = suggestionAccess(s.character_id, req.user!.id);
+  if (typeof req.body?.text === "string") {
+    // The DM can edit any suggestion (including the AI's); players only their own
+    if (!isDM && s.author_id !== req.user!.id) throw new HttpError(403, "You can only edit your own suggestions");
+    const text = req.body.text.trim().slice(0, 5000);
+    if (!text) throw new HttpError(400, "A suggestion can't be empty");
+    run("UPDATE character_suggestions SET text = ?, edited_at = datetime('now') WHERE id = ?", text, s.id);
+  }
   if (req.body?.resolved !== undefined) run("UPDATE character_suggestions SET resolved = ? WHERE id = ?", req.body.resolved ? 1 : 0, s.id);
   res.json({ ok: true });
 });
@@ -506,10 +516,42 @@ function notifyUser(campaignId: number | null, what: string) {
 
 // DM-only notes about a character
 characterRoutes.put("/characters/:id/dm-notes", (req, res) => {
+  // Older single-box form: replaces all notes with one
   const { c, isDM } = loadCharacter(num(req.params.id), req.user!.id);
   if (!isDM) throw new HttpError(403, "Only the DM can see or edit these notes");
   const notes = String(req.body?.notes ?? "").slice(0, 50000);
-  run("INSERT INTO character_dm_notes (character_id, notes, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(character_id) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at", c.id, notes);
+  run("DELETE FROM character_dm_note_items WHERE character_id = ?", c.id);
+  if (notes.trim()) run("INSERT INTO character_dm_note_items (character_id, text) VALUES (?, ?)", c.id, notes);
+  res.json({ ok: true });
+});
+
+// DM-only notes as separate entries
+function dmNoteAccess(characterId: number, userId: number) {
+  const { c, isDM } = loadCharacter(characterId, userId);
+  if (!isDM) throw new HttpError(403, "Only the DM can see or edit these notes");
+  return c;
+}
+characterRoutes.post("/characters/:id/dm-notes/items", (req, res) => {
+  const c = dmNoteAccess(num(req.params.id), req.user!.id);
+  const text = String(req.body?.text ?? "").trim().slice(0, 10000);
+  if (!text) throw new HttpError(400, "Write the note first");
+  if ((one("SELECT COUNT(*) AS n FROM character_dm_note_items WHERE character_id = ?", c.id)!.n as number) >= 200) throw new HttpError(400, "That's a lot of notes. Delete some old ones first.");
+  const r = run("INSERT INTO character_dm_note_items (character_id, text, pinned) VALUES (?, ?, ?)", c.id, text, req.body?.pinned ? 1 : 0);
+  res.json({ id: Number(r.lastInsertRowid) });
+});
+characterRoutes.patch("/character-dm-notes/:nid", (req, res) => {
+  const n = one("SELECT * FROM character_dm_note_items WHERE id = ?", num(req.params.nid));
+  if (!n) throw new HttpError(404, "Note not found");
+  dmNoteAccess(n.character_id, req.user!.id);
+  if (typeof req.body?.text === "string" && req.body.text.trim()) run("UPDATE character_dm_note_items SET text = ?, updated_at = datetime('now') WHERE id = ?", req.body.text.trim().slice(0, 10000), n.id);
+  if (req.body?.pinned !== undefined) run("UPDATE character_dm_note_items SET pinned = ? WHERE id = ?", req.body.pinned ? 1 : 0, n.id);
+  res.json({ ok: true });
+});
+characterRoutes.delete("/character-dm-notes/:nid", (req, res) => {
+  const n = one("SELECT * FROM character_dm_note_items WHERE id = ?", num(req.params.nid));
+  if (!n) throw new HttpError(404, "Note not found");
+  dmNoteAccess(n.character_id, req.user!.id);
+  run("DELETE FROM character_dm_note_items WHERE id = ?", n.id);
   res.json({ ok: true });
 });
 

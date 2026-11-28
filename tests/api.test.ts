@@ -26,6 +26,7 @@ class Client {
   post = (u: string, b: unknown = {}) => this.call("POST", u, b);
   put = (u: string, b: unknown) => this.call("PUT", u, b);
   patch = (u: string, b: unknown) => this.call("PATCH", u, b);
+  delete = (u: string) => this.call("DELETE", u);
 }
 
 const dm = new Client(), sam = new Client(), jo = new Client();
@@ -79,6 +80,43 @@ test("suggestions: player and DM only, not other players", async () => {
   const forJo = await jo.get(`/characters/${charId}`);
   assert.equal(forJo.status, 200);
   assert.equal(JSON.stringify(forJo.data).includes("Lucky feat") || JSON.stringify(forJo.data).includes("Secret heir"), false);
+});
+
+test("DM-only notes can be kept as separate entries, and players can't touch them", async () => {
+  const a = await dm.post(`/characters/${charId}/dm-notes/items`, { text: "Owes the guild 300 gp" });
+  assert.equal(a.status, 200);
+  const b = await dm.post(`/characters/${charId}/dm-notes/items`, { text: "Cursed sword: reveal at level 5" });
+  assert.equal((await dm.patch(`/character-dm-notes/${b.data.id}`, { pinned: true, text: "Cursed sword: reveal at level 6" })).status, 200);
+  const items = (await dm.get(`/characters/${charId}`)).data.dmNoteItems;
+  assert.equal(items[0].text, "Cursed sword: reveal at level 6");
+  assert.equal(items[0].pinned, true);
+  assert.ok(items.some((n: any) => n.text === "Owes the guild 300 gp"));
+  // The owner sees none of it and can't add, change or delete notes
+  const forOwner = JSON.stringify((await sam.get(`/characters/${charId}`)).data);
+  assert.equal(forOwner.includes("guild 300") || forOwner.includes("Cursed sword") || forOwner.includes("dmNoteItems"), false);
+  assert.equal((await sam.post(`/characters/${charId}/dm-notes/items`, { text: "x" })).status, 403);
+  assert.equal((await sam.patch(`/character-dm-notes/${a.data.id}`, { text: "x" })).status, 403);
+  assert.equal((await sam.delete(`/character-dm-notes/${a.data.id}`)).status, 403);
+  assert.equal((await jo.delete(`/character-dm-notes/${a.data.id}`)).status, 403);
+  assert.equal((await dm.delete(`/character-dm-notes/${a.data.id}`)).status, 200);
+  assert.equal((await dm.get(`/characters/${charId}`)).data.dmNoteItems.length, 2);
+});
+
+test("suggestions can be edited by their author or the DM only", async () => {
+  const mine = (await sam.post(`/characters/${charId}/suggestions`, { text: "Can I swap a cantrip?" })).status;
+  assert.equal(mine, 200);
+  const list = (await sam.get(`/characters/${charId}/suggestions`)).data;
+  const samS = list.find((s: any) => s.text === "Can I swap a cantrip?");
+  const dmS = list.find((s: any) => s.text === "Try the Lucky feat");
+  assert.equal((await sam.patch(`/character-suggestions/${samS.id}`, { text: "Can I swap Fire Bolt?" })).status, 200);
+  assert.equal((await sam.patch(`/character-suggestions/${dmS.id}`, { text: "hacked" })).status, 403);
+  assert.equal((await jo.patch(`/character-suggestions/${samS.id}`, { text: "hacked" })).status, 404);
+  assert.equal((await dm.patch(`/character-suggestions/${dmS.id}`, { text: "Try the Alert feat" })).status, 200);
+  assert.equal((await sam.patch(`/character-suggestions/${samS.id}`, { text: "  " })).status, 400);
+  const after = (await sam.get(`/characters/${charId}/suggestions`)).data;
+  assert.ok(after.some((s: any) => s.text === "Can I swap Fire Bolt?" && s.editedAt));
+  assert.ok(after.some((s: any) => s.text === "Try the Alert feat"));
+  assert.equal(after.some((s: any) => s.text === "hacked"), false);
 });
 
 test("NPC stat blocks are hidden from players", async () => {

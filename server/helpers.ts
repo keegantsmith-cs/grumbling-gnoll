@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { all, one, parseJSON } from "./db.ts";
+import { all, one, parseJSON, dmNotesText } from "./db.ts";
 import { UPLOAD_DIR } from "./db.ts";
 import { campaignRole } from "./auth.ts";
 import type { CampaignContext } from "./ai.ts";
@@ -49,8 +49,8 @@ export function campaignContext(campaignId: number): CampaignContext {
 
 function partySummary(campaignId: number, rules: RulesVersion, withSecrets: boolean): string {
   const chars = all(
-    `SELECT c.id, c.data, u.display_name, n.notes AS dm_notes FROM characters c JOIN users u ON u.id = c.owner_id
-     LEFT JOIN character_dm_notes n ON n.character_id = c.id WHERE c.campaign_id = ? AND c.status = 'approved'`,
+    `SELECT c.id, c.data, u.display_name FROM characters c JOIN users u ON u.id = c.owner_id
+     WHERE c.campaign_id = ? AND c.status = 'approved'`,
     campaignId,
   );
   return chars
@@ -58,6 +58,7 @@ function partySummary(campaignId: number, rules: RulesVersion, withSecrets: bool
       const d = normalizeCharacter(parseJSON(row.data, {}), rules);
       const dv = derive(d);
       if (!withSecrets) return `- ${d.name} (played by ${row.display_name}): level ${dv.level} ${d.species} ${classSummary(d)}; AC ${dv.ac}, HP ${dv.maxHp}`;
+      row.dm_notes = dmNotesText(row.id);
       const secret = row.dm_notes?.trim() ? `\n  DM's secret notes about ${d.name} (never reveal these to players directly): ${row.dm_notes.trim().slice(0, 2000)}` : "";
       const story = d.backstory?.trim() ? `\n  Backstory: ${d.backstory.trim().slice(0, 600)}` : "";
       const sugg = all("SELECT author_kind, text FROM character_suggestions WHERE character_id = ? AND resolved = 0 ORDER BY id DESC LIMIT 3", row.id)
