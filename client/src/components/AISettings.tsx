@@ -23,7 +23,12 @@ export function AISettings() {
   }, [data]);
   if (!data) return null;
 
-  const save = async () => { await api.put("/ai/settings", { selected, capUSD: Number(cap) || 0 }); toast("AI settings saved"); reload(); };
+  const save = async () => {
+    try { await api.put("/ai/settings", { selected, capUSD: Number(cap) || 0 }); toast("AI settings saved"); reload(); }
+    catch (e) { toast((e as Error).message || "Couldn't save. Please try again."); }
+  };
+  const presetOn = (p: { pick: Record<string, string> }) => Object.keys(data.features).every((f) => selected[f] === p.pick[f]);
+  const changed = JSON.stringify(selected) !== JSON.stringify(data.selected) || (Number(cap) || 0) !== (data.capUSD || 0);
   const usd = (n: number) => (n > 0 && n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
 
   return (
@@ -35,9 +40,10 @@ export function AISettings() {
       </p>
 
       <h3>Quick choices</h3>
-      <div className="row top" style={{ marginBottom: 10 }}>
+      <p className="muted" style={{ margin: "0 0 8px" }}>Pick one to fill in the list below, then press Save.</p>
+      <div className="row top preset-row" style={{ marginBottom: 10 }}>
         {Object.entries(PRESETS).map(([k, p]) => (
-          <button key={k} style={{ whiteSpace: "normal", textAlign: "left", maxWidth: 260 }} onClick={() => setSelected(p.pick)}>
+          <button key={k} type="button" aria-pressed={presetOn(p)} className={`preset${presetOn(p) ? " active" : ""}`} onClick={() => setSelected(p.pick)}>
             <b>{p.label}</b>
             <div className="muted" style={{ fontSize: 12 }}>{p.desc}</div>
           </button>
@@ -45,15 +51,15 @@ export function AISettings() {
       </div>
 
       <h3>Model for each job</h3>
-      <table className="list"><tbody>
+      <table className="list responsive"><tbody>
         {Object.entries(data.features as Record<string, string>).map(([f, desc]) => (
           <tr key={f}>
             <td>
               {desc}
               {data.byFeature[f] && <div className="muted" style={{ fontSize: 12 }}>This month: {data.byFeature[f].requests} requests, {usd(data.byFeature[f].cost)}</div>}
             </td>
-            <td style={{ width: 230 }}>
-              <select value={selected[f] ?? data.defaultModel} onChange={(e) => setSelected({ ...selected, [f]: e.target.value })}>
+            <td className="model-cell">
+              <select aria-label={`Model for: ${desc}`} value={selected[f] ?? data.defaultModel} onChange={(e) => setSelected({ ...selected, [f]: e.target.value })}>
                 {Object.entries(data.models as Record<string, any>).map(([id, m]) => (
                   <option key={id} value={id}>{m.label.replace("Claude ", "")} (${m.price[0]} / ${m.price[1]})</option>
                 ))}
@@ -66,19 +72,20 @@ export function AISettings() {
         Opus: best quality, most expensive. Sonnet: about half the price of Opus and still very good. Haiku: about 40× cheaper than Opus, great for reading and copying text from PDFs and photos.
       </p>
 
-      <div className="row">
+      <div className="row top" style={{ margin: "12px 0" }}>
         <label>Monthly limit in dollars (blank = none)
           <input type="number" min={0} step={1} value={cap} onChange={(e) => setCap(e.target.value)} style={{ width: 120 }} placeholder="e.g. 5" />
         </label>
-        <span className="muted" style={{ fontSize: 12 }}>When the month's estimated spend reaches this, AI features pause until next month (or until you raise it).</span>
+        <span className="muted" style={{ fontSize: 13, flex: "1 1 260px" }}>When the month's estimated spend reaches this, AI features pause until next month (or until you raise it).</span>
       </div>
-      <button className="primary" onClick={save}>Save AI settings</button>
+      <div className="row"><button className="primary" onClick={save}>Save AI settings</button>{changed && <span className="muted" role="status">You have changes that aren't saved yet.</span>}</div>
 
       <details style={{ marginTop: 14 }}>
         <summary>Recent AI requests and what they cost</summary>
         <table className="list">
           <thead><tr><th>When</th><th>What</th><th>Model</th><th>Tokens in / out</th><th>Cost</th></tr></thead>
           <tbody>
+            {data.recent.length === 0 && <tr><td colSpan={5} className="muted">Nothing yet. Requests will appear here once you use the AI.</td></tr>}
             {data.recent.map((r: any, i: number) => (
               <tr key={i}>
                 <td className="muted">{r.createdAt}</td>

@@ -18,10 +18,10 @@ export function Account() {
         catch (err) { setError((err as Error).message); }
       }}>
         <h2>Change password</h2>
-        {error && <div className="error">{error}</div>}
-        <label>Current password<input type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></label>
-        <label>New password<input type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} minLength={8} /></label>
-        <button className="primary">Save</button>
+        {error && <div className="error" role="alert">{error}</div>}
+        <label>Current password<input type="password" autoComplete="current-password" required value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} /></label>
+        <label>New password<input type="password" autoComplete="new-password" required value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} minLength={8} /><span className="muted field-hint">At least 8 characters.</span></label>
+        <button className="primary">Change password</button>
       </form>
       <DiceBag />
       {!!status.user?.is_admin && status.aiEnabled && <AISettings />}
@@ -29,13 +29,13 @@ export function Account() {
         <div className="card">
           <div className="row" style={{ marginBottom: 10 }}>
             <h2 className="grow" style={{ margin: 0 }}>Backups</h2>
-            <a className="btn primary" href="/api/admin/backup" style={{ textDecoration: "none", background: "var(--red-dark)", color: "#fff" }}>⬇ Download a full backup now</a>
+            <a className="btn primary" href="/api/admin/backup">⬇ Download a full backup now</a>
           </div>
           <p className="muted">One file with everything: the database (accounts, campaigns, characters, chat, compendium) and all uploaded maps, pictures and PDFs. The server also makes one every night. Keep a copy on your own computer now and then.</p>
           <hr />
-          <h2>Players (admin)</h2>
+          <h2>Players</h2>
           <p className="muted">If someone forgets their password, set a temporary one here and tell them.</p>
-          <table className="list"><tbody>
+          <table className="list responsive"><tbody>
             {users.data?.map((u) => (
               <tr key={u.id}>
                 <td>{u.displayName} <span className="muted">@{u.username}</span></td>
@@ -67,9 +67,9 @@ function DiceBag() {
       <DiceTray />
       <h2>🎲 Your dice</h2>
       <p className="muted">Pick the dice you roll with. Everyone at the table sees your rolls in this style.</p>
-      <div className="row">
+      <div className="row" role="group" aria-label="Dice styles">
         {Object.entries(DICE_STYLES).map(([k, s]) => (
-          <button key={k} className={style === k ? "active" : ""} onClick={() => pick(k)} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 6, minWidth: 92 }}>
+          <button key={k} type="button" aria-pressed={style === k} className={style === k ? "active" : ""} onClick={() => pick(k)} style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: 6, minWidth: 92 }}>
             <DiePreview style={k} />
             <span style={{ fontSize: 12 }}>{s.label}</span>
           </button>

@@ -299,3 +299,16 @@ table.list tr.selected td { background: var(--panel-2); box-shadow: inset 3px 0 
   table.list.responsive td[style] { text-align: left !important; }
 }
 .map-thumb.placeholder { display: grid; place-items: center; font-size: 22px; background: var(--panel-2); }
+
+/* ----- polish: Assistant, Convert, Account ----- */
+.btn.primary:focus-visible { outline-offset: 2px; }
+.preset-row { align-items: stretch; }
+button.preset { white-space: normal; text-align: left; flex: 1 1 200px; max-width: 280px; }
+td.model-cell { width: 230px; }
+td.actions-cell { text-align: right; white-space: nowrap; }
+td.actions-cell button { margin-left: 4px; }
+@media (max-width: 600px) {
+  td.model-cell, td.actions-cell { width: auto; text-align: left; white-space: normal; }
+  td.actions-cell button { margin: 0 4px 0 0; }
+  button.preset { max-width: none; flex-basis: 100%; }
+}

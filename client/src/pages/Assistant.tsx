@@ -28,7 +28,7 @@ export function Assistant({ campaign }: { campaign: Campaign }) {
   const usage = useLoad<any>(`/campaigns/${campaign.id}/ai/usage`);
 
   if (!status.aiEnabled) {
-    return <div className="card"><h2>AI assistant</h2><p>AI isn't set up yet. Add your Anthropic API key to the server's <code>.env</code> file as <code>ANTHROPIC_API_KEY</code> and restart it. See the README for the steps.</p></div>;
+    return <div className="card"><h2>AI assistant</h2><p>The AI isn't switched on yet. Add your Anthropic API key to the server's <code>.env</code> file as <code>ANTHROPIC_API_KEY</code> and restart it. See the README for the steps.</p></div>;
   }
 
   async function ask(e?: React.FormEvent) {
@@ -42,32 +42,35 @@ export function Assistant({ campaign }: { campaign: Campaign }) {
     finally { setBusy(false); }
   }
 
+  const kindLabel = (k: string) => KINDS.find((x) => x[0] === k)?.[1].replace(/^\S+\s/, "") ?? k;
   const example = KINDS.find((k) => k[0] === kind)![2];
   return (
     <div>
       <h1>🧙 DM's AI assistant</h1>
-      <p className="muted">Only you can see this. The AI knows your campaign notes (Settings tab), the rules version ({campaign.rulesVersion}), and the party's approved characters.</p>
+      <p className="muted">Only you can see this until you choose to share something. The AI knows your campaign notes (Settings tab), the rules version ({campaign.rulesVersion}), and the party's approved characters.</p>
       <form className="card" onSubmit={ask}>
-        <div className="row" style={{ marginBottom: 10 }}>
-          {KINDS.map(([k, label]) => <button type="button" key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{label}</button>)}
+        <h2 id="ai-kind" style={{ marginTop: 0 }}>What do you need?</h2>
+        <div className="row" role="group" aria-labelledby="ai-kind" style={{ marginBottom: 12 }}>
+          {KINDS.map(([k, label]) => <button type="button" key={k} aria-pressed={kind === k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{label}</button>)}
         </div>
-        <textarea rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={`e.g. ${example}`}
+        <label htmlFor="ai-request" className="sr-only">Your request</label>
+        <textarea id="ai-request" rows={3} value={request} onChange={(e) => setRequest(e.target.value)} placeholder={`e.g. ${example}`}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask(); }} />
         <div className="row" style={{ marginTop: 8 }}>
           <button className="primary" disabled={busy}>{busy ? "Thinking..." : "Ask"}</button>
-          <span className="muted">Ctrl+Enter to send. Leave it blank to be surprised.</span>
-          {usage.data && <span className="muted right" style={{ fontSize: 12 }}>All AI this month: {usage.data.calls} requests ≈ ${usage.data.estimatedUSD.toFixed(2)}{usage.data.capUSD ? ` of $${usage.data.capUSD}` : ""} · <a href="#/account">AI settings</a></span>}
+          <span className="muted" role="status">{busy ? "The AI is writing, this can take a few seconds." : "Ctrl+Enter to send. Leave it blank to be surprised."}</span>
         </div>
+        {usage.data && <p className="muted" style={{ fontSize: 12, margin: "10px 0 0" }}>All AI this month: {usage.data.calls} requests, about ${usage.data.estimatedUSD.toFixed(2)}{usage.data.capUSD ? ` of your $${usage.data.capUSD} limit` : ""}. <a href="#/account">AI settings</a></p>}
       </form>
-      {error && <div className="error">{error}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
       {result && <ResultCard r={result} campaign={campaign} toast={toast} />}
       <Recaps campaignId={campaign.id} isDM />
       {history.data && history.data.length > 0 && (
         <>
-          <h2>Earlier</h2>
+          <h2>Earlier answers</h2>
           {history.data.map((h) => (
             <details key={h.id} className="card">
-              <summary><b>{h.kind}</b> · {h.prompt || "(surprise)"} <span className="muted">· {h.createdAt}</span></summary>
+              <summary><b>{kindLabel(h.kind)}</b> · {h.prompt || "(surprise)"} <span className="muted">· {h.createdAt}</span></summary>
               <ResultCard r={{ kind: h.kind, text: h.output, prompt: h.prompt }} campaign={campaign} toast={toast} plain />
             </details>
           ))}
@@ -80,15 +83,17 @@ export function Assistant({ campaign }: { campaign: Campaign }) {
 function ResultCard({ r, campaign, toast, plain }: { r: { kind: string; text: string; prompt: string }; campaign: Campaign; toast: (s: string) => void; plain?: boolean }) {
   const [text, setText] = useState(r.text);
   const [editing, setEditing] = useState(false);
+  const base = `/campaigns/${campaign.id}`;
+  const act = (p: Promise<unknown>, ok: string) => p.then(() => toast(ok), (e: Error) => toast(e.message || "That didn't work. Please try again."));
   return (
     <div className={plain ? "" : "card"}>
-      {editing ? <textarea rows={16} value={text} onChange={(e) => setText(e.target.value)} /> : <Markdown text={text} />}
+      {editing ? <textarea aria-label="Edit the answer" rows={16} value={text} onChange={(e) => setText(e.target.value)} /> : <Markdown text={text} />}
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="small" onClick={() => setEditing(!editing)}>{editing ? "Done editing" : "Edit"}</button>
-        <button className="small" onClick={() => api.post(`/campaigns/${campaign.id}/share`, { text }).then(() => toast("Shared with the players in chat"))}>Share in chat</button>
-        <button className="small" onClick={() => navigator.clipboard?.writeText(text).then(() => toast("Copied"))}>Copy</button>
-        {r.kind === "npc" && <button className="small" onClick={() => api.post(`/campaigns/${campaign.id}/ai/save-npc`, { text }).then(() => toast("Saved to the Compendium"))}>Save NPC</button>}
-        <button className="small" onClick={() => api.post(`/campaigns/${campaign.id}/compendium`, { kind: "note", name: (r.prompt || r.kind).slice(0, 60), data: { markdown: text } }).then(() => toast("Saved to the Compendium as a note"))}>Save as note</button>
+        <button type="button" className="small" onClick={() => setEditing(!editing)}>{editing ? "Done editing" : "Edit"}</button>
+        <button className="small" onClick={() => act(api.post(`${base}/share`, { text }), "Shared with the players in chat")}>Share in chat</button>
+        <button className="small" onClick={() => act(Promise.resolve(navigator.clipboard?.writeText(text)), "Copied")}>Copy</button>
+        {r.kind === "npc" && <button className="small" onClick={() => act(api.post(`${base}/ai/save-npc`, { text }), "Saved to the Compendium")}>Save NPC</button>}
+        <button className="small" onClick={() => act(api.post(`${base}/compendium`, { kind: "note", name: (r.prompt || r.kind).slice(0, 60), data: { markdown: text } }), "Saved to the Compendium as a note")}>Save as note</button>
       </div>
     </div>
   );
