@@ -10,7 +10,7 @@ export function Login() {
   const [f, setF] = useState({ username: "", displayName: "", password: "", inviteCode: joinCode });
   const [inviteInfo, setInviteInfo] = useState<{ campaign: string | null } | null>(null);
   useEffect(() => {
-    if (joinCode) api.get(`/invites/${joinCode}/info`).then(setInviteInfo).catch((e) => setError(e.message));
+    if (joinCode) api.get(`/invites/${joinCode}/info`).then(setInviteInfo).catch(() => setError("That invite link doesn't look right. Ask your DM to send you a new one."));
   }, [joinCode]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,17 +34,18 @@ export function Login() {
   return (
     <div className="center-page">
       <form className="card narrow" onSubmit={submit}>
-        <h1 style={{ textAlign: "center" }}>🍺 The Grumbling Gnoll</h1>
+        <div className="auth-logo" aria-hidden="true">🍺</div>
+        <h1 style={{ textAlign: "center" }}>The Grumbling Gnoll</h1>
         <p className="muted" style={{ textAlign: "center" }}>
           {status.needsSetup ? "Welcome! Create the first account. It becomes the admin (that's you, DM)." : mode === "login" ? "Pull up a chair, adventurer." : "Join the table with the invite code from your DM."}
         </p>
         {inviteInfo && <div className="notice">🍺 You've been invited{inviteInfo.campaign ? <> to <b>{inviteInfo.campaign}</b></> : ""}! Pick a username and password to join.</div>}
-        {error && <div className="error">{error}</div>}
-        <label>Username<input value={f.username} onChange={set("username")} autoComplete="username" required /></label>
-        {mode === "register" && <label>Display name (what others see)<input value={f.displayName} onChange={set("displayName")} /></label>}
-        <label>Password<input type="password" value={f.password} onChange={set("password")} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "register" ? 8 : undefined} /></label>
+        {error && <div className="error" role="alert">{error}</div>}
+        <label>Username<input value={f.username} onChange={set("username")} autoComplete="username" autoCapitalize="none" spellCheck={false} autoFocus required /></label>
+        {mode === "register" && <label>Display name (what others see, optional)<input value={f.displayName} onChange={set("displayName")} /></label>}
+        <label>Password<input type="password" value={f.password} onChange={set("password")} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "register" ? 8 : undefined} />{mode === "register" && <small className="field-hint">At least 8 characters.</small>}</label>
         {mode === "register" && !status.needsSetup && <label>Invite code<input value={f.inviteCode} onChange={set("inviteCode")} placeholder="ABCD-1234" required /></label>}
-        <button className="primary" style={{ width: "100%" }} disabled={busy}>{mode === "login" ? "Log in" : "Create account"}</button>
+        <button className="primary big" style={{ width: "100%" }} disabled={busy}>{busy ? "One moment..." : mode === "login" ? "Log in" : joinCode ? "Join the table" : "Create account"}</button>
         {!status.needsSetup && (
           <p style={{ textAlign: "center", marginTop: 12 }}>
             <button type="button" className="link" onClick={() => setMode(mode === "login" ? "register" : "login")}>

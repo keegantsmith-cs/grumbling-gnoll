@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { go, useLoad, useStatus } from "../hooks";
+import { activate, go, useLoad, useStatus } from "../hooks";
 import type { Campaign } from "./Campaign";
 import { CharacterPage } from "./CharacterSheet";
 import { StatusPill } from "./Home";
@@ -44,12 +44,15 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
 
   return (
     <div>
-      <div className="row">
+      <div className="row page-head">
         <h1 className="grow">Characters</h1>
+        <button className="primary" onClick={() => setWizard(true)}>🧙 Create a character (step by step)</button>
+      </div>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <span className="muted">Other ways to start:</span>
+        <button onClick={() => setAiMaker(true)}>✨ Let the AI make one</button>
         <button onClick={() => setScanning(true)}>📷 Import paper sheet</button>
         <button onClick={create}>+ Blank sheet</button>
-        <button onClick={() => setAiMaker(true)}>✨ AI makes one</button>
-        <button className="primary" onClick={() => setWizard(true)}>🧙 Create a character (step by step)</button>
       </div>
       {aiMaker && <AiCharacter campaignId={campaign.id} rules={campaign.rulesVersion} onCancel={() => setAiMaker(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
       {wizard && <CharacterWizard campaignId={campaign.id} rules={campaign.rulesVersion} onCancel={() => setWizard(false)} onDone={(id) => go(`c/${campaign.id}/characters/${id}`)} />}
@@ -62,7 +65,7 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
         {list.data?.map((c) => {
           const dv = derive(c.data);
           return (
-            <div key={c.id} className="card" style={{ cursor: "pointer" }} onClick={() => go(`c/${campaign.id}/characters/${c.id}`)}>
+            <div key={c.id} className="card clickable" aria-label={`Open ${c.name}`} {...activate(() => go(`c/${campaign.id}/characters/${c.id}`))}>
               <div className="row"><h2 className="grow" style={{ margin: 0 }}>{c.name}</h2><StatusPill c={c} /></div>
               <p className="muted" style={{ margin: "4px 0" }}>Level {dv.level} {c.data.species} {classSummary(c.data)}</p>
               <p className="muted" style={{ margin: 0 }}>Played by {c.ownerName}{c.ownerId === status.user?.id ? " (you)" : ""}</p>
@@ -73,19 +76,19 @@ export function CharactersTab({ campaign, changed, openId, roll }: { campaign: C
           );
         })}
       </div>
-      {list.data?.length === 0 && <div className="empty"><b>No characters yet.</b><br />Click "Create a character" above and the site walks you through it step by step.</div>}
+      {list.data?.length === 0 && <div className="empty"><b>No characters yet.</b><br />Press "Create a character" above and the site walks you through it, one step at a time.</div>}
 
       <div className="card" style={{ marginTop: 16 }}>
         <h3>Bring a character from elsewhere</h3>
         <p className="muted">A copy comes into this campaign, then the AI checks it against the {campaign.rulesVersion} rules and the DM approves it.</p>
         <div className="row">
           {elsewhere.length > 0 && (
-            <select style={{ width: "auto" }} value="" onChange={(e) => e.target.value && bring(Number(e.target.value))}>
+            <select aria-label="Pick one of your characters to copy in" style={{ width: "auto" }} value="" onChange={(e) => e.target.value && bring(Number(e.target.value))}>
               <option value="">Pick one of your characters...</option>
               {elsewhere.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.campaignName ?? "no campaign"})</option>)}
             </select>
           )}
-          <label className="btn" style={{ margin: 0, color: "var(--text)" }}>
+          <label className="btn file-btn">
             Upload a character file
             <input type="file" accept=".json,application/json" hidden onChange={(e) => e.target.files?.[0] && uploadFile(e.target.files[0])} />
           </label>

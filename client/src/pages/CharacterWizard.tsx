@@ -113,6 +113,12 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
     true,
   ][step];
 
+  const needHint = [
+    "Type a name to continue.", "Pick a species to continue.", "Pick a class to continue.", "Pick a background to continue.",
+    "Give every ability a score to continue.", `Pick ${Math.max(0, skillChoicesNeeded - chosenClassSkills.length)} more skill${skillChoicesNeeded - chosenClassSkills.length === 1 ? "" : "s"} to continue.`,
+    "Roll your hit points to continue (or take the average).", "", "", "",
+  ][step];
+
   function buildCharacter(): CharacterData {
     const d = blankCharacter(rules);
     const abilities = Object.fromEntries(ABILITIES.map((a) => [a, finalScore(a)])) as Record<Ability, number>;
@@ -156,11 +162,11 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
 
   return (
     <div className="card">
-      <div className="row"><h2 className="grow" style={{ margin: 0 }}>🧙 Create a character</h2><button className="small" onClick={onCancel}>Cancel</button></div>
+      <div className="row"><h2 className="grow">🧙 Create a character</h2><button className="small" onClick={onCancel}>Cancel</button></div>
       <p className="muted">5th Edition ({rules} rules), step by step. Dice are rolled by the site and shown to the table.</p>
-      <div className="row" style={{ gap: 4, marginBottom: 14 }}>
+      <div className="row steps" style={{ gap: 4, marginBottom: 14 }} role="list" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <button key={s} className={`small ${i === step ? "active" : ""}`} disabled={i > step} onClick={() => setStep(i)} style={{ opacity: i < step ? 0.8 : 1 }}>
+          <button key={s} role="listitem" aria-current={i === step ? "step" : undefined} className={`small ${i === step ? "active" : ""}`} disabled={i > step} onClick={() => setStep(i)} style={{ opacity: i < step ? 0.8 : 1 }}>
             {i < step ? "✓ " : `${i + 1}. `}{s}
           </button>
         ))}
@@ -399,6 +405,7 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
         {step < STEPS.length - 1
           ? <button className="primary" disabled={!canNext} onClick={next}>Next: {STEPS[step + 1]} →</button>
           : <button className="primary" disabled={busy} onClick={create}>{busy ? "Creating..." : campaignId ? "Create & send to DM" : "Create character"}</button>}
+        {step < STEPS.length - 1 && !canNext && needHint && <span className="muted" role="status">{needHint}</span>}
       </div>
     </div>
   );
