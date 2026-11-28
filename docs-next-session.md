@@ -7,8 +7,8 @@ I'm the DM for my D&D group and the owner of The Grumbling Gnoll, a private D&D 
 
 Where things stand:
 - The site is live on my DigitalOcean droplet. I update it by running: bash /opt/grumbling-gnoll/deploy/update.sh
-- Features include: live table (maps, tokens, fog, rings, line of sight, right-click menu, animated dice), character sheets with DM approval, step-by-step and AI character makers, SRD lookup, compendium, PDF edition conversion, adventures with run guides and maps, AI map enrichment, encounter builder, AI assistant, AI NPCs for the map, session recaps, Discord webhooks and Join voice button, backups.
-- Already done in earlier sessions: privacy/security review, a simulated game-night playtest, rules-math fixes with tests, and two design passes on the Table screen and character sheet (screenshots in docs/screenshots/ux-review). Please don't redo those; build on them.
+- Features include: live table (maps, tokens, fog, rings, line of sight, right-click menu, animated dice), character sheets with DM approval, step-by-step and AI character makers, SRD lookup, compendium, PDF edition conversion, adventures with run guides and maps, AI map enrichment, encounter builder, AI assistant, AI NPCs for the map, session recaps, Discord webhooks and Join voice button, backups, DM-only character notes (a list of separate notes you can pin, edit and delete), and private character suggestions that can be edited.
+- Already done in earlier sessions: privacy/security review, a simulated game-night playtest, rules-math fixes with tests, design passes on the Table screen, character sheet, Approvals and Settings (screenshots in docs/screenshots/ux-review), hiding fogged tokens from players, and my rules decisions (monster HP is DM-only, characters follow the campaign's rules switch, automatic armor AC). Please don't redo those; build on them. Check the git log if you're unsure whether something is finished.
 - AI costs: I choose models per job in Account > AI settings and have a monthly limit.
 - Our first real session is around December 15, so please favor polish and reliability over big new features.
 
@@ -18,10 +18,10 @@ How I'd like you to work:
 - Tell me honestly what you tested and what still needs my real API key to try.
 
 What I want in this session (in this order, using the agents in .claude/agents/):
-1. website-designer: review and clean up the rest of the site, one area at a time: login/sign-up and joining a campaign, Home and campaign list, Characters list and both character makers, Approvals, Maps, Adventures, Compendium, AI Assistant, Convert editions, Settings and Account. Check laptop and tablet sizes. Save before/after screenshots in docs/screenshots/ux-review.
+1. website-designer: review and clean up the rest of the site, one area at a time: login/sign-up and joining a campaign, Home and campaign list, Characters list and both character makers, Maps, Adventures, Compendium, AI Assistant, Convert editions and Account (Approvals and Settings are done). Check laptop and tablet sizes. Save before/after screenshots in docs/screenshots/ux-review.
 2. Small leftovers from earlier reviews, if not already done: a touch-friendly way to open the map's right-click menu on tablets (e.g. long-press), and letting players roll attacks from a sheet they can't edit.
 3. playtester: a fresh full game night in a browser (DM + 3 players, including one on a tablet) to catch anything the many recent changes broke, then fix what it finds.
-4. privacy-guard: a quick re-check that none of this session's changes leak DM-only information.
+4. privacy-guard: a quick re-check that none of this session's changes leak DM-only information, including the new separate DM-only notes and edited suggestions.
 5. Finish with a short "before game night" checklist for me: what to try myself with my real API key, and anything I should set up (Discord webhooks, backups, player invites).
 After each step, give me a short plain-language summary of what changed.
 ```
