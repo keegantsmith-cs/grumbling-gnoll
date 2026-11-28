@@ -3,7 +3,8 @@ import { all, one, run } from "../db.ts";
 import { requireAdmin, requireUser } from "../auth.ts";
 import { campaignAccess, campaignContext, HttpError } from "../helpers.ts";
 import { postChat } from "../realtime.ts";
-import { AI_MODEL, ASSIST_KINDS, FEATURES, MODELS, dmAssist, getSetting, modelFor, monthSpend, setSetting, type AssistKind, type Feature } from "../ai.ts";
+import { narrationFacts, NARRATION_KINDS, type NarrationEvent } from "../combat.ts";
+import { AI_MODEL, ASSIST_KINDS, narrateCombat, FEATURES, MODELS, dmAssist, getSetting, modelFor, monthSpend, setSetting, type AssistKind, type Feature } from "../ai.ts";
 
 export const aiRoutes = Router();
 aiRoutes.use(requireUser);
@@ -15,6 +16,16 @@ aiRoutes.post("/campaigns/:id/ai/assist", async (req, res) => {
   const kind = String(req.body?.kind ?? "freeform") as AssistKind;
   if (!(kind in ASSIST_KINDS)) throw new HttpError(400, "Unknown request type");
   const text = await dmAssist(campaignContext(id), req.user!.id, kind, String(req.body?.request ?? "").slice(0, 4000));
+  res.json({ text });
+});
+
+// "Narrate" button in the Combat tab: 1-3 sentences about one moment. The DM reads it first; nothing is posted automatically.
+aiRoutes.post("/campaigns/:id/ai/narrate", async (req, res) => {
+  const { id } = campaignAccess(req, true);
+  const ev = (req.body?.event ?? {}) as NarrationEvent;
+  if (!NARRATION_KINDS.includes(ev.kind)) throw new HttpError(400, "Say what happened (hit, miss, kill...)");
+  const facts = narrationFacts(id, ev);
+  const text = await narrateCombat(id, req.user!.id, facts, typeof req.body?.avoid === "string" ? req.body.avoid : undefined);
   res.json({ text });
 });
 

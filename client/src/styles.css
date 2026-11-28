@@ -351,3 +351,5 @@ button.chip-on { border-color: var(--gold); color: var(--gold); }
 .damage-box { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
 .init-status { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
 .init-list li { align-items: flex-start; }
+.narration { background: #2a2230; border: 1px solid #7a5aa0; border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
+.narration textarea { width: 100%; margin: 6px 0; font-style: italic; }

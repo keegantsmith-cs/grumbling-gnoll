@@ -5,7 +5,7 @@ import type { Socket } from "socket.io";
 import { all, one, parseJSON, run, type Row } from "./db.ts";
 import { describeRoll, diceList, rollDice, type DieGroup, type RolledDie, type RollResult } from "../shared/dice.ts";
 import { broadcastMap, canSee, chatOut, dmIdOf, eachSocket, fogOf, notify, postChat, tokenOnActiveMap, tokenVisible, type SocketData } from "./realtime.ts";
-import { derive, normalizeCharacter, ABILITIES, ABILITY_NAMES, SKILLS, mod, fmtMod, type Ability } from "../shared/character.ts";
+import { classSummary, derive, normalizeCharacter, ABILITIES, ABILITY_NAMES, SKILLS, mod, fmtMod, type Ability } from "../shared/character.ts";
 import {
   characterActions, monsterCombatData, healthWord, STANDARD_OPTIONS, d20Expression, doubleDice, addDice, resolveAttack,
   adjustDamage, takeDamage, heal as healHp, gainTempHp, deathSave, CONDITIONS,
@@ -375,7 +375,7 @@ function applyDamageTo(cid: number, t: Row, x: DamageRequest) {
     postChat(cid, null, "text", { text: `🔵 ${t.name} is concentrating on ${t.concentrating}: Constitution save, DC ${r.concentrationDC}, or the spell ends.` }, secret ? dmIdOf(cid) : null);
   }
   if (r.dropped && t.concentrating) { run("UPDATE tokens SET concentrating = '' WHERE id = ?", t.id); postChat(cid, null, "text", { text: `🔵 ${t.name} loses concentration on ${t.concentrating} (knocked out).` }, secret ? dmIdOf(cid) : null); conc = null; }
-  return { tokenId: t.id, name: t.name, dealt: total, hp: r.hp, max, temp: r.temp, notes: [...notes, ...r.notes], dropped: r.dropped, dead: r.dead, concentration: conc };
+  return { tokenId: t.id, name: t.name, character: a.kind === "character", dealt: total, hp: r.hp, max, temp: r.temp, notes: [...notes, ...r.notes], dropped: r.dropped, dead: r.dead, concentration: conc };
 }
 
 function healToken(cid: number, t: Row, amount: number) {
@@ -633,4 +633,48 @@ function upcastParts(a: CombatAction, slot: unknown): { dice: string; type: stri
     parts[0].dice = addDice(parts[0].dice, a.upcast.dice, extra);
   }
   return parts;
+}
+
+// ---------- narration: only facts the players already know ----------
+
+export const NARRATION_KINDS = ["hit", "crit", "miss", "fumble", "kill", "down", "dead"] as const;
+export type NarrationKind = (typeof NARRATION_KINDS)[number];
+export interface NarrationEvent { kind: NarrationKind; attackerId?: number; targetId?: number; action?: string; damageType?: string; melee?: boolean; tone?: string }
+
+/**
+ * The facts handed to the AI for text the players will read. Hidden creatures are never named, monsters are only
+ * described by name and (at most) the same rough health word players already see. No HP, AC, stat blocks, DM notes or secrets.
+ */
+export function narrationFacts(cid: number, ev: NarrationEvent): string {
+  const describe = (id?: number): string => {
+    if (id == null) return "";
+    const t = tokenOnActiveMap(Number(id), cid);
+    if (!t) return "";
+    if (t.hidden) return "an unseen creature (do not name it or say what it is)";
+    if (t.character_id) {
+      const sheet = loadSheet(t.character_id);
+      return `${t.name}, a player character${sheet ? ` (${sheet.data.species ? `${sheet.data.species} ` : ""}${classSummary(sheet.data)})`.replace(/\(\s*\)/, "") : ""}`;
+    }
+    return `${String(t.name).replace(/\s+\d+$/, "")}${t.controlled_by ? ", an ally" : ", a monster"}`;
+  };
+  const attacker = describe(ev.attackerId), target = describe(ev.targetId);
+  const result: Record<NarrationKind, string> = {
+    hit: "The attack hits.", crit: "The attack is a critical hit: an especially devastating, well-placed strike.", miss: "The attack misses.",
+    fumble: "The attacker rolled a natural 1: a clumsy fumble, the attack goes wildly astray.", kill: "The blow kills the target.",
+    down: "The blow drops the target to 0 hit points: they fall unconscious and are dying.", dead: "The blow slays the target outright.",
+  };
+  const t = ev.targetId != null ? tokenOnActiveMap(Number(ev.targetId), cid) : null;
+  // The same rough word players see on the map, never numbers
+  const state = t && !t.hidden && !t.character_id && (ev.kind === "hit" || ev.kind === "crit") ? healthWord(t.hp, t.max_hp) : null;
+  const clean = (s: unknown, n = 60) => String(s ?? "").replace(/[\r\n]+/g, " ").slice(0, n).trim();
+  return [
+    "Narrate this moment of combat.",
+    attacker && `Attacker: ${attacker}`,
+    target && `Target: ${target}`,
+    ev.action && `Weapon or spell: ${clean(ev.action)}${ev.melee === true ? " (in melee)" : ev.melee === false ? " (at range)" : ""}`,
+    `Result: ${result[ev.kind]}`,
+    ev.damageType && (ev.kind === "hit" || ev.kind === "crit" || ev.kind === "kill" || ev.kind === "down" || ev.kind === "dead") && `Damage type: ${clean(ev.damageType, 20)}`,
+    state && state !== "healthy" && `The target is now visibly ${state}.`,
+    ev.tone && `Tone: ${clean(ev.tone, 40)}`,
+  ].filter(Boolean).join("\n");
 }

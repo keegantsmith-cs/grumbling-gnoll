@@ -38,7 +38,9 @@ const SECTION_LABEL: Record<string, string> = {
 
 type Mode = "normal" | "adv" | "dis";
 interface Prompt { title: string; fields: { key: string; label: string; hint?: string }[]; submit: (vals: Record<string, string>) => void }
-interface Last { text: string; tone: "good" | "bad" | "crit" | "plain"; damage?: { a: CombatAction; crit: boolean; slot?: number }; error?: boolean }
+interface NarrEvent { kind: "hit" | "crit" | "miss" | "fumble" | "kill" | "down" | "dead"; attackerId?: number; targetId?: number; action?: string; damageType?: string; melee?: boolean }
+interface Last { text: string; tone: "good" | "bad" | "crit" | "plain"; damage?: { a: CombatAction; crit: boolean; slot?: number }; error?: boolean; event?: NarrEvent }
+interface Narr { event: NarrEvent; text: string; loading: boolean; error?: string }
 
 const useLocalFlag = (key: string, initial = false) => {
   const [v, setV] = useState(() => { try { return localStorage.getItem(key) === "1" ? true : localStorage.getItem(key) === "0" ? false : initial; } catch { return initial; } });
@@ -61,6 +63,7 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
   const [last, setLast] = useState<Last | null>(null);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
   const [slots, setSlots] = useState<Record<string, number>>({});
+  const [narr, setNarr] = useState<Narr | null>(null);
   const token = tokens.find((t) => t.id === tokenId) ?? null;
 
   // Tokens this person can act with: the DM any; players their own character and tokens handed to them
@@ -109,7 +112,8 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
       const who = targetName(r.targetId);
       const tip = who ? ` → ${who}` : "";
       const word = r.outcome === "crit" ? `💥 Critical hit!${tip}` : r.outcome === "hit" ? `✔ Hit${tip}` : r.outcome === "miss" ? `✘ Miss${tip}` : r.outcome === "fumble" ? `✘ Natural 1: automatic miss${tip}` : `Rolled ${r.total}. Pick a target to see if it hits.`;
-      setLast({ text: `${word} (${r.total})${r.damage ? ` — ${r.damage.total} damage` : ""}`, tone: r.outcome === "crit" ? "crit" : r.outcome === "hit" ? "good" : r.outcome === "miss" || r.outcome === "fumble" ? "bad" : "plain", damage: !r.damage && (r.outcome === "hit" || r.outcome === "crit" || r.outcome === "unknown") ? { a, crit: r.outcome === "crit" } : undefined });
+      setLast({ text: `${word} (${r.total})${r.damage ? ` — ${r.damage.total} damage` : ""}`, tone: r.outcome === "crit" ? "crit" : r.outcome === "hit" ? "good" : r.outcome === "miss" || r.outcome === "fumble" ? "bad" : "plain", damage: !r.damage && (r.outcome === "hit" || r.outcome === "crit" || r.outcome === "unknown") ? { a, crit: r.outcome === "crit" } : undefined,
+        event: r.outcome === "unknown" ? undefined : { kind: r.outcome, attackerId: token?.id, targetId: r.targetId ?? undefined, action: a.name, damageType: a.damage?.[0]?.type, melee: a.melee } });
     }));
   }
   function damage(a: CombatAction, crit: boolean) {
@@ -143,6 +147,22 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
         : { op: "roll", name: actor.name, bonus: actor.initiative, hidden: !!token.hidden && campaign.isDM, tokenId: token.id });
       setLast({ text: "Initiative sent to the turn order", tone: "plain" });
     });
+  }
+  /** Ask the AI for 1-3 sentences about a moment. Nothing is shown to players until the DM chooses to post it. */
+  async function narrate(event: NarrEvent, avoid?: string) {
+    setNarr({ event, text: avoid ?? "", loading: true });
+    try {
+      const r = await api.post<{ text: string }>(`/campaigns/${campaign.id}/ai/narrate`, { event, avoid });
+      setNarr({ event, text: r.text, loading: false });
+    } catch (e) { setNarr({ event, text: "", loading: false, error: (e as Error).message }); }
+  }
+  async function shareNarration(toMe: boolean) {
+    if (!narr?.text.trim()) return;
+    try {
+      await api.post(`/campaigns/${campaign.id}/share`, { title: toMe ? "Narration (private)" : "⚔", text: narr.text.trim(), ...(toMe ? { toUserId: me } : {}) });
+      toast(toMe ? "Saved privately in your chat" : "Posted to the chat");
+      setNarr(null);
+    } catch (e) { toast((e as Error).message); }
   }
   /** Which spell slot level a spell will use (0 = none) */
   function slotFor(a: CombatAction) { return !a.level ? 0 : slots[a.id] ?? a.level; }
@@ -199,11 +219,27 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
           </div>
 
           <div className="group-label">Damage &amp; healing</div>
-          <DamageBox ids={healthIds} names={healthIds.map((id) => tokens.find((x) => x.id === id)?.name ?? "?")} isDM={campaign.isDM} emit={emit} defenses={campaign.isDM} />
+          <DamageBox attackerId={token.id} onNarrate={campaign.isDM ? narrate : undefined} ids={healthIds} names={healthIds.map((id) => tokens.find((x) => x.id === id)?.name ?? "?")} isDM={campaign.isDM} emit={emit} defenses={campaign.isDM} />
 
           {prompt && <OwnDicePrompt p={prompt} cancel={() => setPrompt(null)} />}
+          {narr && (
+            <div className="narration" role="region" aria-label="Narration">
+              <b>📖 Narration</b>
+              {narr.loading && <p className="muted">Writing…</p>}
+              {narr.error && <p className="notice">{narr.error}</p>}
+              {!narr.loading && !narr.error && <textarea aria-label="Narration text" rows={4} value={narr.text} onChange={(e) => setNarr({ ...narr, text: e.target.value })} />}
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                <button className="small primary" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(false)}>📢 Post to chat</button>
+                <button className="small" disabled={narr.loading || !!narr.error || !narr.text.trim()} onClick={() => shareNarration(true)}>🔒 Keep private</button>
+                <button className="small" disabled={narr.loading} onClick={() => narrate(narr.event, narr.text || undefined)}>🎲 Reroll</button>
+                <button className="small link" onClick={() => setNarr(null)}>Close</button>
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Only the attacker, target, weapon and result are sent to the AI: never HP, AC, hidden monsters or your notes.</div>
+            </div>
+          )}
           {last && <div className={`last-result ${last.tone}`} role="status">
             <span>{last.text}</span>
+            {campaign.isDM && last.event && <button className="small" onClick={() => narrate(last.event!)} title="Ask the AI for a short description. You read it first; nothing is posted until you choose.">📖 Narrate</button>}
             {last.damage && <button className="small primary" onClick={() => damage(last.damage!.a, last.damage!.crit)}>{last.damage.crit ? "💥 Roll critical damage" : "Roll damage"}</button>}
             <button className="small link" aria-label="Dismiss" onClick={() => setLast(null)}>✕</button>
           </div>}
@@ -389,14 +425,15 @@ function Summary({ t, actor, isDM, emit, onDeath, onConc }: { t: Token; actor: A
 }
 
 /** Damage, healing and temporary HP for the targets (or for the acting creature when none are picked). */
-function DamageBox({ names, ids, isDM, emit, defenses }: { names: string[]; ids: number[]; isDM: boolean; emit: Emit; defenses: boolean }) {
+function DamageBox({ names, ids, isDM, emit, defenses, attackerId, onNarrate }: { names: string[]; ids: number[]; isDM: boolean; emit: Emit; defenses: boolean; attackerId: number; onNarrate?: (e: NarrEvent) => void }) {
   const [amt, setAmt] = useState("");
   const [type, setType] = useState("");
   const [half, setHalf] = useState<number[]>([]);
   const [msg, setMsg] = useState("");
+  const [falls, setFalls] = useState<{ id: number; name: string; kind: NarrEvent["kind"] }[]>([]);
   const n = Math.abs(Math.round(Number(amt) || 0));
   const summarize = (rs: any[]) => rs.map((r) => `${r.name}: −${r.dealt}${r.notes?.length ? ` (${r.notes.join(", ")})` : ""} → ${r.hp}/${r.max}${r.dead ? " dead" : r.dropped ? " down" : ""}${r.concentration ? ` · concentration check DC ${r.concentration.dc}` : ""}`).join("; ");
-  const damage = () => { if (!n) return; emit("combat:apply", { targets: ids.map((id) => ({ tokenId: id, amount: n, type, half: half.includes(id) })) }, (r) => { setMsg(summarize(r.results)); setAmt(""); setHalf([]); }); };
+  const damage = () => { if (!n) return; emit("combat:apply", { targets: ids.map((id) => ({ tokenId: id, amount: n, type, half: half.includes(id) })) }, (r) => { setMsg(summarize(r.results)); setAmt(""); setHalf([]); setFalls((r.results as any[]).filter((x) => x.dropped || x.dead).map((x) => ({ id: x.tokenId, name: x.name, kind: x.dead ? "dead" : x.character ? "down" : "kill" }))); }); };
   const healAll = () => { if (!n) return; ids.forEach((id) => emit("combat:heal", { tokenId: id, amount: n })); setMsg(`Healed ${names.join(", ")} for ${n}`); setAmt(""); };
   const tempAll = () => { if (!n) return; ids.forEach((id) => emit("combat:heal", { tokenId: id, amount: n, temp: true })); setMsg(`${names.join(", ")}: temporary HP ${n}`); setAmt(""); };
   return (
@@ -419,6 +456,7 @@ function DamageBox({ names, ids, isDM, emit, defenses }: { names: string[]; ids:
       )}
       {isDM && ids.length === 1 && <label className="inline" style={{ margin: "4px 0 0", fontSize: 13 }}><input type="checkbox" checked={half.includes(ids[0])} onChange={() => setHalf(half.length ? [] : [ids[0]])} /> Saved: half damage</label>}
       {msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }} role="status">{msg}</div>}
+      {onNarrate && falls.map((f) => <button key={f.id} className="small" style={{ marginTop: 4 }} onClick={() => onNarrate({ kind: f.kind, attackerId, targetId: f.id })}>📖 Narrate: {f.name} {f.kind === "dead" ? "is slain" : f.kind === "down" ? "goes down" : "falls"}</button>)}
     </div>
   );
 }

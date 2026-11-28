@@ -395,3 +395,64 @@ test("conditions: added with a timer, shown to everyone, and the table is remind
   D.s.emit("initiative", { op: "clear" });
   for (const x of [D, S, J]) x.s.close();
 });
+
+test("narration: only the DM can ask, it needs a real event, and with no API key it says so plainly", async () => {
+  const ev = { kind: "hit", attackerId: samTokenId, targetId: goblinId, action: "Warhammer", damageType: "bludgeoning" };
+  assert.equal((await sam.post(`/campaigns/${campaignId}/ai/narrate`, { event: ev })).status, 403);
+  assert.equal((await dm.post(`/campaigns/${campaignId}/ai/narrate`, { event: { kind: "explode" } })).status, 400);
+  const r = await dm.post(`/campaigns/${campaignId}/ai/narrate`, { event: ev });
+  assert.equal(r.status, 502);
+  assert.match(r.data.error, /AI is not set up/);
+});
+
+test("narration: the AI is only given facts players already know (no hidden monsters, HP, AC or stat blocks) and the cost is logged", async () => {
+  process.env.DATA_DIR = dataDir;
+  process.env.ANTHROPIC_API_KEY ??= "test-key";
+  const ai = await import("../server/ai.ts");
+  const combat = await import("../server/combat.ts");
+  const calls: any[] = [];
+  ai.setAIClientForTests({ beta: { messages: { create: async (req: any) => {
+    calls.push(req);
+    return { stop_reason: "end_turn", model: "claude-opus-5-5", usage: { input_tokens: 120, output_tokens: 45 }, content: [{ type: "text", text: "Mirabel's warhammer crunches into the goblin." }] };
+  } } } });
+  try {
+    // A visible, wounded goblin hit by a player character
+    await dm.post(`/campaigns/${campaignId}/table/monsters`, { monster: (await dm.get("/srd/monster/Wolf")).data, count: 1, initiative: "none", x: 300, y: 300, name: "Wolf" });
+    const D = await live(dm);
+    await waitFor(() => !!tokenByName(D, "Wolf"));
+    const wolfId = tokenByName(D, "Wolf").id;
+    await D.ask("combat:apply", { targets: [{ tokenId: wolfId, amount: 9 }] }); // 11 HP -> 2: near death
+    D.s.close();
+    const visible = combat.narrationFacts(campaignId, { kind: "hit", attackerId: samTokenId, targetId: wolfId, action: "Warhammer", damageType: "bludgeoning", melee: true });
+    assert.match(visible, /Attacker: Mirabel, a player character/);
+    assert.match(visible, /Target: Wolf, a monster/);
+    assert.match(visible, /near death/);
+    assert.equal(/\b(HP|hit points?:|AC|armor class)\b/i.test(visible.replace("0 hit points", "")), false);
+    assert.equal(/\b11\b|\b2 HP\b/.test(visible), false);
+    // A hidden monster (the orc) is never named, whether it attacks or is attacked
+    const hiddenAttack = combat.narrationFacts(campaignId, { kind: "crit", attackerId: hiddenId, targetId: samTokenId, action: "Greataxe" });
+    assert.equal(has(hiddenAttack, "Orc"), false);
+    assert.match(hiddenAttack, /unseen creature/);
+    const hiddenTarget = combat.narrationFacts(campaignId, { kind: "kill", attackerId: samTokenId, targetId: hiddenId });
+    assert.equal(has(hiddenTarget, "Orc"), false);
+    // Facts only: nothing from the stat block, DM notes or other tokens sneaks in
+    await dm.patch(`/campaigns/${campaignId}`, { dmNotes: "The Orc is secretly the duke's son" });
+    // the AI call itself: short, cheap, uses the assistant model setting, logs its cost, and sends only the facts
+    const text = await ai.narrateCombat(campaignId, 1, hiddenAttack + "\nTone: grim");
+    assert.equal(text, "Mirabel's warhammer crunches into the goblin.");
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].max_tokens <= 400);
+    const sent = JSON.stringify(calls[0]);
+    for (const bad of ["Orc", "duke", "Scimitar", "Nimble Escape", "dm_key", "DM's private"]) assert.equal(sent.includes(bad), false, `AI request contained "${bad}"`);
+    const rerolled = await ai.narrateCombat(campaignId, 1, visible, "the old text");
+    assert.ok(rerolled && has(calls[1], "clearly different"));
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(path.join(dataDir, "grumbling-gnoll.db"), { readonly: true });
+    const rows = db.prepare("SELECT kind, cost_usd, output_tokens FROM ai_history WHERE kind = 'narration'").all() as any[];
+    db.close();
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((r) => r.cost_usd > 0 && r.output_tokens === 45));
+  } finally {
+    ai.setAIClientForTests(null);
+  }
+});

@@ -194,6 +194,35 @@ export async function dmAssist(ctx: CampaignContext, userId: number, kind: Assis
   }
 }
 
+// ---------- Combat narration (a button the DM presses; never automatic) ----------
+
+const NARRATION_SYSTEM = `You narrate single moments of a Dungeons & Dragons fight for the Dungeon Master to read aloud to the players.
+Write 1 to 3 vivid sentences, present tense, using only the facts you are given. Name the attacker, the target and the weapon or spell when they are given.
+Never invent numbers (damage, hit points, armor class), hidden creatures, abilities, secrets or backstory. If a creature is described as unseen, do not name it or say what it is.
+Plain prose only: no headings, lists, quotation marks around game terms, or rules talk.`;
+
+/** Short, cheap: a few sentences from the facts the server has checked are safe for players to read. */
+export async function narrateCombat(campaignId: number, userId: number, facts: string, avoid?: string): Promise<string> {
+  const anthropic = getClient();
+  const prompt = `${facts}${avoid ? `\n\nWrite a clearly different version from this earlier attempt: "${avoid.slice(0, 600)}"` : ""}`;
+  try {
+    const msg = await anthropic.beta.messages.create({
+      ...callParams("assistant"),
+      max_tokens: 400,
+      output_config: { effort: "low" },
+      system: [{ type: "text", text: NARRATION_SYSTEM }],
+      messages: [{ role: "user", content: prompt }],
+    });
+    checkStop(msg);
+    const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
+    if (!text) throw new AIError("The AI didn't write anything. Try again.");
+    logUsage(campaignId, userId, "narration", prompt, text, msg);
+    return text;
+  } catch (e) {
+    friendlyError(e);
+  }
+}
+
 // ---------- Character review (imports from other campaigns, or any pending change) ----------
 
 const ReviewSchema = z.object({
