@@ -192,3 +192,12 @@ test("what players see of a monster's health is only a rough word", () => {
   assert.equal(healthWord(0, 30), "down");
   assert.equal(healthWord(null, 30), null);
 });
+
+test("stat blocks: breath weapons recharge on 5-6 even though the bundled SRD data lost that note", () => {
+  const breath = parseMonsterActions(monster("Adult Red Dragon")).find((a) => a.name === "Fire Breath")!;
+  assert.equal(breath.recharge, "5–6");
+  const wyrm = parseMonsterActions(monster("Young Red Dragon")).find((a) => a.name === "Fire Breath")!;
+  assert.equal(wyrm.recharge, "5–6");
+  // ordinary attacks and legendary actions don't recharge
+  assert.equal(parseMonsterActions(monster("Adult Red Dragon")).find((a) => a.name === "Bite")!.recharge, undefined);
+});

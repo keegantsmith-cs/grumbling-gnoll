@@ -149,6 +149,8 @@ export function parseMonsterActions(m: Record<string, any>): CombatAction[] {
           if (area) act.range = area[0];
         }
       }
+      // The bundled SRD data lost the "(Recharge 5-6)" notes. Every SRD breath weapon (and Mind Blast) recharges on a 5-6.
+      if (!act.recharge && !act.uses && section === "action" && act.kind === "save" && (/\bbreath$/i.test(name) || /^mind blast$/i.test(name))) act.recharge = "5–6";
       out.push(act);
     });
   }
@@ -502,4 +504,9 @@ export interface Actor {
   conditions: string;
   concentrating: string;
   rulesVersion?: string;
+  /** Recharge abilities that are spent / daily uses so far, by action id */
+  used: Record<string, number>;
+  /** Spell slots left per level 1-9 (characters) */
+  slotsLeft?: number[];
+  pactLeft?: { count: number; level: number };
 }

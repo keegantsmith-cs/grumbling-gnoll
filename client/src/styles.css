@@ -326,3 +326,18 @@ td.actions-cell button { margin-left: 4px; }
 .small-roll { display: inline-block; cursor: pointer; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font-size: 13px; user-select: none; }
 .small-roll:hover, .small-roll:focus-visible { border-color: var(--gold); outline: none; }
 @media (max-width: 900px) { .small-roll { min-height: 36px; display: inline-flex; align-items: center; } }
+.roll-controls { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: 6px 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: var(--panel-2); font-size: 12px; padding: 4px 8px; min-height: 30px; }
+.seg button.active { background: var(--red-dark); color: var(--text); box-shadow: inset 0 -2px var(--gold); }
+button.chip-on { border-color: var(--gold); color: var(--gold); }
+.own-dice { background: var(--panel-2); border: 1px solid var(--gold); border-radius: var(--radius); padding: 8px 10px; margin: 8px 0; }
+.last-result { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius); margin: 8px 0; background: var(--panel-2); border-left: 4px solid var(--line); }
+.last-result > span { flex: 1 1 160px; font-weight: 600; }
+.last-result.good { border-left-color: var(--green); }
+.last-result.bad { border-left-color: var(--red); }
+.last-result.crit { border-left-color: var(--gold); background: #3a2d12; }
+.combat-badge { font-size: 13px; font-weight: 600; margin-top: 2px; padding-left: 8px; border-left: 3px solid var(--line); }
+.combat-badge.good { border-left-color: var(--green); color: #9fd18f; }
+.combat-badge.bad { border-left-color: var(--red); color: #ff9b85; }
+.combat-badge.crit { border-left-color: var(--gold); color: var(--gold); }

@@ -82,6 +82,7 @@ function Message({ m }: { m: ChatMsg }) {
             <div className="muted" style={{ fontSize: 12 }}><Markdown text={m.body.detail} /></div>
           </span>
         </div>
+        {m.body.combat && <CombatBadge c={m.body.combat} />}
         {m.body.crit === "success" && <div style={{ color: "#8fe07a", fontSize: 12 }}>Natural 20!</div>}
         {m.body.crit === "fail" && <div style={{ color: "#ff7a63", fontSize: 12 }}>Natural 1...</div>}
       </div>
@@ -97,4 +98,24 @@ function Message({ m }: { m: ChatMsg }) {
     );
   }
   return <div className={cls}>{header}<div style={{ whiteSpace: "pre-wrap" }}>{m.body.text}</div></div>;
+}
+
+/** The hit / miss / success line under a combat roll in the chat. */
+function CombatBadge({ c }: { c: any }) {
+  if (c.kind === "attack") {
+    const o = c.outcome as string;
+    const text = o === "crit" ? "💥 Critical hit!" : o === "hit" ? "✔ Hit" : o === "miss" ? "✘ Miss" : o === "fumble" ? "✘ Natural 1: miss" : "";
+    if (!text) return null;
+    return <div className={`combat-badge ${o === "crit" ? "crit" : o === "hit" ? "good" : "bad"}`}>{text}{c.target ? ` → ${c.target.name}` : ""}{c.ac != null ? ` (AC ${c.ac})` : ""}</div>;
+  }
+  if ((c.kind === "save" || c.kind === "check" || c.kind === "skill") && c.dc != null) return <div className={`combat-badge ${c.success ? "good" : "bad"}`}>{c.success ? "✔ Success" : "✘ Failure"} vs DC {c.dc}</div>;
+  if (c.kind === "saveall") {
+    return (
+      <div className="combat-badge">
+        {c.rows.map((r: any) => <div key={r.id}>{r.success ? "✔" : "✘"} {r.name}: {r.total} vs DC {c.dc} {r.success ? (c.half ? "(half damage)" : "(no effect)") : ""}</div>)}
+      </div>
+    );
+  }
+  if (c.kind === "damage" && c.targets?.length) return <div className="combat-badge">→ {c.targets.map((t: any) => t.name).join(", ")}</div>;
+  return null;
 }

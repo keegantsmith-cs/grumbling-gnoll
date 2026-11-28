@@ -28,7 +28,7 @@ class Client {
   patch = (u: string, b: unknown) => this.call("PATCH", u, b);
 }
 const dm = new Client(), sam = new Client(), jo = new Client();
-let campaignId = 0, charId = 0, samTokenId = 0, joTokenId = 0, joCharId = 0, goblinId = 0, hiddenId = 0;
+let campaignId = 0, charId = 0, samTokenId = 0, joTokenId = 0, joCharId = 0, goblinId = 0, hiddenId = 0, dragonId = 0;
 
 async function live(c: Client) {
   const s: Socket = ioClient(`http://localhost:${PORT}`, { extraHeaders: { cookie: c.cookie }, transports: ["websocket"], forceNew: true });
@@ -76,9 +76,10 @@ before(async () => {
   const goblin = (await dm.get("/srd/monster/Goblin")).data;
   await dm.post(`/campaigns/${campaignId}/table/monsters`, { monster: goblin, count: 1, initiative: "none", x: 400, y: 200 });
   await dm.post(`/campaigns/${campaignId}/table/monsters`, { monster: (await dm.get("/srd/monster/Orc")).data, count: 1, initiative: "none", hidden: true, x: 500, y: 200 });
-  await waitFor(() => D.last("map")?.tokens?.length === 4);
+  await dm.post(`/campaigns/${campaignId}/table/monsters`, { monster: (await dm.get("/srd/monster/Adult%20Red%20Dragon")).data, count: 1, initiative: "none", x: 600, y: 300 });
+  await waitFor(() => D.last("map")?.tokens?.length === 5);
   samTokenId = tokenByName(D, "Mirabel").id; joTokenId = tokenByName(D, "Tobin").id;
-  goblinId = tokenByName(D, "Goblin").id; hiddenId = tokenByName(D, "Orc").id;
+  goblinId = tokenByName(D, "Goblin").id; dragonId = tokenByName(D, "Adult Red Dragon").id; hiddenId = tokenByName(D, "Orc").id;
   for (const x of [D, S, J]) x.s.close();
 });
 after(() => { server.kill(); fs.rmSync(dataDir, { recursive: true, force: true }); });
@@ -132,4 +133,114 @@ test("combat panel: the acting creature's attacks are only given to the DM or th
   assert.equal(has(J.all("chat"), "Dash"), false);
   assert.equal(D.all("chat").filter((m) => has(m.body, "Dash")).length, 1); // Sam's attempt was ignored
   for (const x of [D, S, J]) x.s.close();
+});
+
+const swordId = async (L: Live) => (await L.ask("combat:actor", { tokenId: samTokenId })).actor.actions.find((a: any) => a.name === "Longsword").id;
+
+test("rolling: a player's attack with a typed-in die works out hit, miss and critical against the DM's secret AC", async () => {
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  const id = await swordId(S);
+  const hit = await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: goblinId, manual: 10 });
+  assert.equal(hit.outcome, "hit"); // 10 + 5 = 15 meets the goblin's AC 15
+  assert.equal(hit.total, 15);
+  assert.equal((await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: goblinId, manual: 9 })).outcome, "miss");
+  assert.equal((await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: goblinId, manual: 20 })).outcome, "crit");
+  assert.equal((await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: goblinId, manual: 1 })).outcome, "fumble");
+  await waitFor(() => J.all("chat").filter((m) => m.kind === "roll").length >= 4);
+  const seen = J.all("chat").filter((m) => m.kind === "roll");
+  assert.deepEqual(seen.map((m) => m.body.combat.outcome), ["hit", "miss", "crit", "fumble"]);
+  assert.equal(seen[0].body.combat.target.name, "Goblin");
+  // players learn hit or miss, never the goblin's AC
+  assert.equal(has(J.all("chat"), '"ac"'), false);
+  assert.equal(has(S.all("chat"), '"ac"'), false);
+  assert.equal(has(J.all("chat"), "AC 15"), false);
+  // a real (server-rolled) attack with advantage
+  const rolled = await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: goblinId, mode: "adv" });
+  assert.ok(rolled.total >= 6 && rolled.total <= 25);
+  assert.match(D.all("chat").filter((m) => m.kind === "roll").at(-1).body.expression, /2d20kh1/);
+  for (const x of [D, S, J]) x.s.close();
+});
+
+test("rolling: damage doubles the dice (not the bonus) on a critical, and a typed total is used as-is", async () => {
+  const S = await live(sam);
+  const id = await swordId(S);
+  for (let i = 0; i < 20; i++) {
+    const r = await S.ask("combat:roll", { tokenId: samTokenId, kind: "damage", actionId: id, targetId: goblinId, crit: true });
+    assert.ok(r.total >= 2 + 3 && r.total <= 16 + 3, `crit damage ${r.total}`);
+    const n = await S.ask("combat:roll", { tokenId: samTokenId, kind: "damage", actionId: id, targetId: goblinId });
+    assert.ok(n.total >= 1 + 3 && n.total <= 8 + 3);
+  }
+  const typed = await S.ask("combat:roll", { tokenId: samTokenId, kind: "damage", actionId: id, targetId: goblinId, manual: 11 });
+  assert.equal(typed.total, 11);
+  assert.deepEqual(typed.parts, [{ amount: 11, type: "slashing" }]);
+  S.s.close();
+});
+
+test("rolling: checks, saves and skills use the sheet's numbers; typed-in dice work too", async () => {
+  const S = await live(sam);
+  assert.equal((await S.ask("combat:roll", { tokenId: samTokenId, kind: "check", ability: "str", manual: 14 })).total, 14 + 3);
+  assert.equal((await S.ask("combat:roll", { tokenId: samTokenId, kind: "save", ability: "con", manual: 10, dc: 14 })).success, true); // Con +2, proficient +2
+  const athletics = await S.ask("combat:roll", { tokenId: samTokenId, kind: "skill", skill: "athletics", manual: 5 });
+  assert.equal(athletics.total, 5 + 3);
+  assert.ok((await S.ask("combat:roll", { tokenId: samTokenId, kind: "check", ability: "nope" })).error);
+  S.s.close();
+});
+
+test("rolling: the DM's monster rolls stay hidden from players unless the DM shows them", async () => {
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  const scim = (await D.ask("combat:actor", { tokenId: goblinId })).actor.actions.find((a: any) => a.name === "Scimitar").id;
+  const secret = await D.ask("combat:roll", { tokenId: goblinId, kind: "attack", actionId: scim, targetId: samTokenId, manual: 12 });
+  assert.equal(secret.outcome, "hit"); // 12 + 4 = 16 vs Mirabel's AC 16
+  await pause();
+  assert.equal(has(S.all("chat"), "Scimitar"), false);
+  assert.equal(has(J.all("chat"), "Scimitar"), false);
+  const dmCopy = D.all("chat").find((m) => has(m.body, "Scimitar"));
+  assert.equal(dmCopy.body.combat.ac, 16); // the DM sees what it was rolled against
+  // Shown to the table: everyone sees the result, but still not the AC
+  await D.ask("combat:roll", { tokenId: goblinId, kind: "attack", actionId: scim, targetId: samTokenId, manual: 3, show: true });
+  await waitFor(() => has(S.all("chat"), "Scimitar"));
+  const pub = S.all("chat").find((m) => has(m.body, "Scimitar"));
+  assert.equal(pub.body.combat.outcome, "miss");
+  assert.equal(pub.body.combat.ac, undefined);
+  // A player's secret roll goes to the DM only
+  const id = await swordId(S);
+  await S.ask("combat:roll", { tokenId: samTokenId, kind: "check", ability: "dex", manual: 8, secret: true });
+  await pause();
+  assert.equal(has(J.all("chat"), "Dexterity check"), false);
+  assert.equal(D.all("chat").some((m) => has(m.body, "Dexterity check")), true);
+  assert.ok(id);
+  for (const x of [D, S, J]) x.s.close();
+});
+
+test("rolling: nobody rolls for a creature they don't control, or targets what they can't see", async () => {
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  const id = await swordId(S);
+  assert.ok((await J.ask("combat:roll", { tokenId: samTokenId, kind: "check", ability: "str" })).error);
+  assert.ok((await S.ask("combat:roll", { tokenId: goblinId, kind: "check", ability: "str" })).error);
+  // Sam can name the hidden orc as a target, but it's ignored: the result carries no target
+  const r = await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: id, targetId: hiddenId, manual: 15 });
+  assert.equal(r.targetId, null);
+  assert.equal(r.outcome, "unknown"); // with nothing to compare against, the site says so instead of guessing
+  for (const x of [D, S, J]) x.s.close();
+});
+
+test("rolling: a breath weapon rolls damage once and a save for each target (typed saves allowed); half on a success", async () => {
+  const D = await live(dm);
+  const breath = (await D.ask("combat:actor", { tokenId: dragonId })).actor.actions.find((a: any) => a.name === "Fire Breath");
+  const r = await D.ask("combat:roll", { tokenId: dragonId, kind: "saveall", actionId: breath.id, targetIds: [samTokenId, joTokenId], manualSaves: { [samTokenId]: 20, [joTokenId]: 2 } });
+  const [sam1, jo1] = r.rows;
+  assert.equal(sam1.success, true); // 20 + Dex 1 = 21 meets DC 21
+  assert.equal(jo1.success, false);
+  assert.equal(r.parts[0].type, "fire");
+  assert.ok(r.total >= 18 && r.total <= 108);
+  assert.deepEqual(r.apply.halfFor, [samTokenId]);
+  assert.deepEqual(r.apply.tokenIds.sort(), [samTokenId, joTokenId].sort());
+  // using it marks the recharge ability as spent; a recharge roll can bring it back
+  const after = (await D.ask("combat:actor", { tokenId: dragonId })).actor;
+  assert.equal(after.used[breath.id], 1);
+  let back = false;
+  for (let i = 0; i < 40 && !back; i++) back = (await D.ask("combat:roll", { tokenId: dragonId, kind: "recharge", actionId: breath.id })).back;
+  assert.equal(back, true);
+  assert.equal((await D.ask("combat:actor", { tokenId: dragonId })).actor.used[breath.id], undefined);
+  D.s.close();
 });

@@ -6,7 +6,7 @@ import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
 import { derive, normalizeCharacter } from "../shared/character.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
-import { buildActor, controlsToken, publicHealth } from "./combat.ts";
+import { buildActor, controlsToken, publicHealth, registerCombat } from "./combat.ts";
 import { STANDARD_OPTIONS } from "../shared/combat.ts";
 import type { MonsterCombat } from "../shared/combat.ts";
 
@@ -21,7 +21,7 @@ function parseCookie(header: string): Record<string, string> {
   return out;
 }
 
-interface SocketData {
+export interface SocketData {
   user: Row;
   campaignId?: number;
   isDM?: boolean;
@@ -54,7 +54,7 @@ export function pointRevealed(fog: Row[], x: number, y: number) {
 }
 
 /** Fog settings of a map, read once so several tokens can be checked against them. */
-function fogOf(mapId: number) {
+export function fogOf(mapId: number) {
   const m = one("SELECT fog_enabled, fog FROM maps WHERE id = ?", mapId);
   return { enabled: !!m?.fog_enabled, shapes: parseJSON<Row[]>(m?.fog, []) };
 }
@@ -64,7 +64,7 @@ function fogOf(mapId: number) {
  * Players never get hidden tokens, and (with fog of war on) nothing standing in fog,
  * except player characters and tokens handed to players, which they always get.
  */
-function tokenVisible(t: Row, isDM: boolean, fog: { enabled: boolean; shapes: Row[] }) {
+export function tokenVisible(t: Row, isDM: boolean, fog: { enabled: boolean; shapes: Row[] }) {
   if (isDM) return true;
   if (t.hidden) return false;
   if (!fog.enabled) return true;
@@ -141,7 +141,7 @@ function canSee(msg: { userId: number | null; whisperTo: number | null }, userId
 }
 
 /** Send something to everyone in a campaign, letting each person get their own version (DM vs player). */
-function eachSocket(campaignId: number, fn: (s: Socket, data: SocketData) => void) {
+export function eachSocket(campaignId: number, fn: (s: Socket, data: SocketData) => void) {
   for (const s of io.sockets.adapter.rooms.get(room(campaignId)) ?? []) {
     const sock = io.sockets.sockets.get(s);
     if (sock) fn(sock, sock.data as SocketData);
@@ -214,7 +214,7 @@ function findUserInCampaign(campaignId: number, name: string): Row | undefined {
   );
 }
 
-function dmIdOf(campaignId: number): number {
+export function dmIdOf(campaignId: number): number {
   return one("SELECT dm_user_id FROM campaigns WHERE id = ?", campaignId)!.dm_user_id;
 }
 
@@ -237,7 +237,7 @@ function canMoveToken(t: Row, d: SocketData) {
   return false;
 }
 
-function tokenOnActiveMap(tokenId: number, campaignId: number) {
+export function tokenOnActiveMap(tokenId: number, campaignId: number) {
   return one(
     "SELECT t.* FROM tokens t JOIN maps m ON m.id = t.map_id WHERE t.id = ? AND m.campaign_id = ?",
     tokenId,
@@ -310,6 +310,8 @@ export function initRealtime(server: HttpServer) {
       const whisper = d.isDM ? (p.public ? null : d.user.id) : p.secret ? dmIdOf(d.campaignId) : null;
       doRoll(d.campaignId, d.user.id, p.expr, String(p.label ?? "").slice(0, 100), whisper, socket);
     });
+
+    registerCombat(socket);
 
     // ---- combat: the acting creature's attacks and numbers (only for the DM or whoever controls the token) ----
     socket.on("combat:actor", (p: { tokenId: number }, ack?: (r: unknown) => void) => {
