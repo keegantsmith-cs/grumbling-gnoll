@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { api } from "../api";
 import { useStatus } from "../hooks";
 import {
-  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, blankCharacter, classInfo, derive, fmtMod, isArmorOrShield, mod,
+  ABILITIES, ABILITY_NAMES, CLASSES, SKILLS, blankCharacter, bonusHpPerLevel, classInfo, derive, fmtMod, isArmorOrShield, mod,
   type Ability, type CharacterData, type RulesVersion,
 } from "../../../shared/character";
 import { ALIGNMENTS, backgroundsFor, speciesFor, subclassesFor } from "../../../shared/options";
@@ -78,7 +78,9 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
   const conMod = mod(finalScore("con") || 10);
   const hd = info?.hitDie ?? 8;
   const extraLevels = level - 1;
-  const hpTotal = hd + conMod + (extraLevels > 0
+  // Hill Dwarf (and 2024 Dwarf) get +1 HP per level on top of the class hit points
+  const toughHp = bonusHpPerLevel({ ...blankCharacter(rules), species }).perLevel * level;
+  const hpTotal = toughHp + hd + conMod + (extraLevels > 0
     ? hpMode === "roll" && hpRoll ? hpRoll.values.reduce((s, v) => s + v, 0) + conMod * extraLevels : (hd / 2 + 1 + conMod) * extraLevels
     : 0);
 
@@ -358,6 +360,7 @@ export function CharacterWizard({ campaignId, rules, onDone, onCancel }: { campa
             </>
           )}
           <p style={{ fontSize: 18 }}>Maximum hit points: <b>{Math.max(1, hpTotal)}</b></p>
+          {toughHp > 0 && <p className="muted" style={{ fontSize: 12 }}>Includes +{toughHp} from Dwarven Toughness (+1 hit point per level).</p>}
         </div>
       )}
 
@@ -421,7 +424,7 @@ export function Review({ d, complete }: { d: CharacterData; complete?: boolean }
         {ABILITIES.map((a) => <span key={a} className="pill">{a.toUpperCase()} {d.abilities[a]} ({fmtMod(dv.mods[a])})</span>)}
       </div>
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="pill">HP {dv.maxHp}</span><span className="pill">AC {dv.ac}{complete ? "" : " (no armor yet)"}</span><span className="pill">Speed {d.speed} ft</span>
+        <span className="pill">HP {dv.maxHp}</span><span className="pill">AC {dv.ac}{complete || (dv.acSource && dv.acSource !== "10 + Dex") ? "" : " (no armor yet)"}</span><span className="pill">Speed {d.speed} ft</span>
         <span className="pill">Initiative {fmtMod(dv.initiative)}</span><span className="pill">Proficiency {fmtMod(dv.proficiencyBonus)}</span>
         {dv.spellSaveDC && <span className="pill">Spell DC {dv.spellSaveDC}</span>}
       </div>
