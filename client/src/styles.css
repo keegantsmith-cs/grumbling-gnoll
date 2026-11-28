@@ -341,3 +341,13 @@ button.chip-on { border-color: var(--gold); color: var(--gold); }
 .combat-badge.good { border-left-color: var(--green); color: #9fd18f; }
 .combat-badge.bad { border-left-color: var(--red); color: #ff9b85; }
 .combat-badge.crit { border-left-color: var(--gold); color: var(--gold); }
+.death-saves { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 8px; margin: 4px 0; border: 1px solid var(--red); border-radius: 6px; background: #3a1812; }
+.death-saves .dot { display: inline-block; width: 20px; text-align: center; opacity: 0.35; }
+.death-saves .dot.ok { opacity: 1; color: #9fd18f; }
+.death-saves .dot.bad { opacity: 1; color: #ff7a63; }
+.cond-chip button.link { padding: 0 2px; min-height: 0; font-size: 11px; }
+.combat-more { margin-top: 6px; }
+.combat-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.damage-box { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
+.init-status { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
+.init-list li { align-items: flex-start; }

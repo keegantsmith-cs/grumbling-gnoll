@@ -2,12 +2,13 @@
 // Everything is worked out here on the server, from the character sheet or the monster's stat block,
 // so players can't fake bonuses and DM-only numbers (monster AC, HP, actions) never leave the server.
 import type { Socket } from "socket.io";
-import { one, parseJSON, run, type Row } from "./db.ts";
+import { all, one, parseJSON, run, type Row } from "./db.ts";
 import { describeRoll, diceList, rollDice, type DieGroup, type RolledDie, type RollResult } from "../shared/dice.ts";
-import { broadcastMap, dmIdOf, fogOf, notify, postChat, tokenOnActiveMap, tokenVisible, type SocketData } from "./realtime.ts";
+import { broadcastMap, canSee, chatOut, dmIdOf, eachSocket, fogOf, notify, postChat, tokenOnActiveMap, tokenVisible, type SocketData } from "./realtime.ts";
 import { derive, normalizeCharacter, ABILITIES, ABILITY_NAMES, SKILLS, mod, fmtMod, type Ability } from "../shared/character.ts";
 import {
   characterActions, monsterCombatData, healthWord, STANDARD_OPTIONS, d20Expression, doubleDice, addDice, resolveAttack,
+  adjustDamage, takeDamage, heal as healHp, gainTempHp, deathSave, CONDITIONS,
   type Actor, type AttackOutcome, type CombatAction, type MonsterCombat, type SpellFacts,
 } from "../shared/combat.ts";
 import { srdMonster, srdSpell } from "./routes/srd.ts";
@@ -54,7 +55,7 @@ export function buildActor(t: Row): Actor {
       hp: data.hp.current, maxHp: dv.maxHp, tempHp: data.hp.temp ?? 0, deathSaves: data.deathSaves,
       ac: dv.ac, mods: dv.mods, saves: dv.saves, skills: dv.skills, initiative: dv.initiative,
       actions, resist: [], vuln: [], immune: [], condImmune: [], traits: [], notes,
-      proficiencyBonus: dv.proficiencyBonus, spellSaveDC: dv.spellSaveDC ?? null, rulesVersion: data.rulesVersion, used: {},
+      proficiencyBonus: dv.proficiencyBonus, spellSaveDC: dv.spellSaveDC ?? null, rulesVersion: data.rulesVersion, used: {}, effects: effectsOf(t),
       slotsLeft: dv.spellSlots.map((n, i) => Math.max(0, n - (data.spellSlotsUsed[i] ?? 0))),
       pactLeft: dv.pact.count ? { count: Math.max(0, dv.pact.count - (data.pactSlotsUsed ?? 0)), level: dv.pact.level } : undefined,
     };
@@ -71,7 +72,7 @@ export function buildActor(t: Row): Actor {
     ac: t.ac ?? m?.ac ?? null, mods: m ? mods : ZERO, saves, skills, initiative: mods.dex,
     actions: m?.actions ?? [], resist: m?.resist ?? [], vuln: m?.vuln ?? [], immune: m?.immune ?? [], condImmune: m?.condImmune ?? [],
     traits: m?.traits ?? [], notes: m ? [] : ["No stat block is saved for this token, so there are no attacks to show. You can still type damage and conditions."],
-    proficiencyBonus: null, spellSaveDC: null, used: parseJSON<any>(t.combat, {}).used ?? {},
+    proficiencyBonus: null, spellSaveDC: null, used: parseJSON<any>(t.combat, {}).used ?? {}, effects: effectsOf(t),
   };
 }
 
@@ -82,6 +83,8 @@ export function publicHealth(t: Row, isDM: boolean) {
   const hp: number | null = sheet ? sheet.data.hp.current : t.hp;
   const max: number | null = sheet ? sheet.dv.maxHp : t.max_hp;
   const out: Record<string, unknown> = {
+    // a character's HP always comes from their sheet, so the token and sheet can never disagree
+    ...(sheet ? { hp, maxHp: max } : {}),
     health: healthWord(hp, max),
     tempHp: sheet ? sheet.data.hp.temp ?? 0 : isDM || !monster ? Number(t.temp_hp) || 0 : 0,
   };
@@ -209,14 +212,271 @@ const ABILITY_LABEL = (a: Ability) => ABILITY_NAMES[a];
 
 export function registerCombat(socket: Socket) {
   const d = socket.data as SocketData;
-  socket.on("combat:roll", (p: any, ack?: (r: unknown) => void) => {
-    const reply = typeof ack === "function" ? ack : () => {};
-    try {
-      reply(handleRoll(d, p ?? {}));
-    } catch (e) {
-      reply({ error: (e as Error).message || "That roll didn't work" });
+  const guard = (ack: unknown, fn: () => unknown) => {
+    const reply = typeof ack === "function" ? (ack as (r: unknown) => void) : () => {};
+    try { reply(fn()); } catch (e) { reply({ error: (e as Error).message || "That didn't work" }); }
+  };
+  /** The token a request is about, if this person is allowed to act on it. */
+  const mine = (p: any): Row => {
+    if (!d.campaignId) throw new Error("Not in a campaign");
+    const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
+    if (!t) throw new Error("That token isn't on the map any more");
+    if (!controlsToken(t, d.user.id, !!d.isDM)) throw new Error("That isn't your token");
+    return t;
+  };
+
+  socket.on("combat:actor", (p: any, ack: unknown) => guard(ack, () => ({ actor: buildActor(mine(p)) })));
+  socket.on("combat:roll", (p: any, ack: unknown) => guard(ack, () => handleRoll(d, p ?? {})));
+
+  // "Dash", "Dodge"... announced in chat so everyone knows what was chosen. Dodge is remembered until your next turn.
+  socket.on("combat:do", (p: any, ack: unknown) => guard(ack, () => {
+    const t = mine(p);
+    const opt = STANDARD_OPTIONS.find((o) => o.key === p?.key);
+    if (!opt) throw new Error("Unknown option");
+    postChat(d.campaignId!, d.user.id, "text", { text: `⚔ ${t.name}: ${opt.label}. ${opt.hint}` }, t.hidden ? dmIdOf(d.campaignId!) : null);
+    if (opt.effect === "dodge") { addEffect(d.campaignId!, t, { name: "Dodging", at: "start", rounds: 0 }); broadcastMap(d.campaignId!); }
+    return { ok: true };
+  }));
+
+  // Damage: the DM applies it to one or more targets (resistance, vulnerability and immunity are worked out from the stat block)
+  socket.on("combat:apply", (p: any, ack: unknown) => guard(ack, () => {
+    const cid = d.campaignId;
+    if (!cid) throw new Error("Not in a campaign");
+    const list = (Array.isArray(p?.targets) ? p.targets : []).slice(0, 20);
+    const results = [];
+    for (const x of list) {
+      const t = tokenOnActiveMap(Number(x.tokenId), cid);
+      if (!t) continue;
+      // Players may only apply damage to their own character (e.g. "you take 6 damage" from the DM)
+      if (!d.isDM && !(controlsToken(t, d.user.id, false) && (t.character_id || t.controlled_by))) throw new Error("Only the DM can apply damage to others");
+      results.push(applyDamageTo(cid, t, x));
     }
-  });
+    if (p?.msgId && d.isDM) markApplied(cid, Number(p.msgId));
+    broadcastMap(cid);
+    return { ok: true, results };
+  }));
+
+  socket.on("combat:heal", (p: any, ack: unknown) => guard(ack, () => {
+    const t = mine(p);
+    const kind = p?.temp ? "temp" : "heal";
+    const out = kind === "temp" ? giveTempHp(d.campaignId!, t, Number(p.amount)) : healToken(d.campaignId!, t, Number(p.amount));
+    broadcastMap(d.campaignId!);
+    return { ok: true, ...out };
+  }));
+
+  socket.on("combat:death", (p: any, ack: unknown) => guard(ack, () => {
+    const out = rollDeathSave(d.campaignId!, mine(p), p?.manual);
+    broadcastMap(d.campaignId!);
+    return out;
+  }));
+
+  // Conditions (with an optional timer), concentration and a monster's AC
+  socket.on("combat:condition", (p: any, ack: unknown) => guard(ack, () => {
+    const t = mine(p);
+    const cid = d.campaignId!;
+    const name = String(p?.name ?? "").trim().slice(0, 30);
+    if (!name) throw new Error("Pick a condition");
+    const pretty = CONDITIONS.find((c) => c.toLowerCase() === name.toLowerCase()) ?? name;
+    let warning = "";
+    if (p.op === "remove") {
+      removeCondition(t, pretty);
+      removeEffect(t, pretty);
+    } else {
+      const immune = buildActor(t).condImmune.some((c) => c.toLowerCase() === pretty.toLowerCase());
+      if (immune && d.isDM) warning = `${t.name} is immune to ${pretty} (stat block). Added anyway.`;
+      addCondition(t, pretty);
+      const e = p.ends;
+      if (e && (e.kind === "start" || e.kind === "end" || e.kind === "rounds")) addEffect(cid, t, { name: pretty, at: e.kind === "end" ? "end" : "start", rounds: e.kind === "rounds" ? clampInt(e.rounds, 1, 100) : 0, condition: true });
+    }
+    broadcastMap(cid);
+    return { ok: true, warning };
+  }));
+
+  socket.on("combat:set", (p: any, ack: unknown) => guard(ack, () => {
+    const t = mine(p);
+    if (p.concentrating !== undefined) {
+      run("UPDATE tokens SET concentrating = ? WHERE id = ?", String(p.concentrating ?? "").slice(0, 60), t.id);
+      if (p.concentrating) postChat(d.campaignId!, d.user.id, "text", { text: `🔵 ${t.name} is concentrating on ${String(p.concentrating).slice(0, 60)}.` }, hiddenFromPlayers(t) ? dmIdOf(d.campaignId!) : null);
+    }
+    if (p.ac !== undefined && d.isDM) run("UPDATE tokens SET ac = ? WHERE id = ?", p.ac === null || p.ac === "" ? null : clampInt(p.ac, 0, 40), t.id);
+    broadcastMap(d.campaignId!);
+    return { ok: true };
+  }));
+}
+
+/** Monsters and hidden tokens keep their business between the DM and the dice. */
+const hiddenFromPlayers = (t: Row) => !!t.hidden || (!t.character_id && !t.controlled_by);
+
+// ----- hit points -----
+
+/** Write a character's HP / temp HP / death saves to the sheet (and the token that mirrors it), or a monster's to its token. */
+function writeHealth(t: Row, patch: { hp?: number; temp?: number; deathSaves?: { successes: number; failures: number } }) {
+  const sheet = loadSheet(t.character_id);
+  if (sheet) {
+    const { data, dv } = sheet;
+    if (patch.hp !== undefined) data.hp.current = Math.max(0, Math.min(dv.maxHp, Math.round(patch.hp)));
+    if (patch.temp !== undefined) data.hp.temp = Math.max(0, Math.round(patch.temp));
+    if (patch.deathSaves) data.deathSaves = patch.deathSaves;
+    run("UPDATE characters SET data = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(data), t.character_id);
+    if (patch.hp !== undefined) { run("UPDATE tokens SET hp = ? WHERE character_id = ?", data.hp.current, t.character_id); t.hp = data.hp.current; }
+    notifyChars(sheet.row.campaign_id);
+  } else {
+    if (patch.hp !== undefined) { const max = t.max_hp ?? patch.hp; run("UPDATE tokens SET hp = ? WHERE id = ?", Math.max(0, Math.min(max, Math.round(patch.hp))), t.id); t.hp = Math.max(0, Math.min(max, Math.round(patch.hp))); }
+    if (patch.temp !== undefined) { run("UPDATE tokens SET temp_hp = ? WHERE id = ?", Math.max(0, Math.round(patch.temp)), t.id); t.temp_hp = patch.temp; }
+  }
+}
+
+const condList = (t: Row) => String(t.conditions ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+function addCondition(t: Row, name: string) {
+  const list = condList(t);
+  if (!list.some((c) => c.toLowerCase() === name.toLowerCase())) list.push(name);
+  t.conditions = list.join(", ").slice(0, 200);
+  run("UPDATE tokens SET conditions = ? WHERE id = ?", t.conditions, t.id);
+}
+function removeCondition(t: Row, name: string) {
+  t.conditions = condList(t).filter((c) => c.toLowerCase() !== name.toLowerCase()).join(", ");
+  run("UPDATE tokens SET conditions = ? WHERE id = ?", t.conditions, t.id);
+}
+
+export interface DamageRequest { parts?: { amount: number; type?: string }[]; amount?: number; type?: string; half?: boolean; magical?: boolean; crit?: boolean; ignoreDefenses?: boolean; source?: string }
+
+/** Apply damage to one token, announce it the right way, and report what happened. */
+function applyDamageTo(cid: number, t: Row, x: DamageRequest) {
+  const a = buildActor(t);
+  const parts = (Array.isArray(x.parts) && x.parts.length ? x.parts : [{ amount: x.amount ?? 0, type: x.type ?? "" }]).slice(0, 8);
+  const def = x.ignoreDefenses ? { resist: [], vuln: [], immune: [] } : { resist: a.resist, vuln: a.vuln, immune: a.immune };
+  let total = 0;
+  const notes: string[] = [];
+  for (const part of parts) {
+    const adj = adjustDamage(Number(part.amount) || 0, String(part.type ?? ""), def, { half: !!x.half, magical: !!x.magical });
+    total += adj.amount;
+    if (adj.note) notes.push(adj.note);
+  }
+  const before = a.hp ?? 0;
+  const max = a.maxHp ?? Math.max(1, before);
+  const r = takeDamage({ hp: before, max, temp: a.tempHp, deathSaves: a.deathSaves ?? undefined, isCharacter: a.kind === "character" }, total, { crit: !!x.crit, concentrating: !!t.concentrating });
+  writeHealth(t, { hp: r.hp, temp: r.temp, ...(r.deathSaves ? { deathSaves: r.deathSaves } : {}) });
+  if (a.kind === "character" && r.dropped) { addCondition(t, "Unconscious"); }
+  if (r.dead) addCondition(t, a.kind === "character" ? "Dead" : "Dead");
+  const secret = hiddenFromPlayers(t);
+  const typeText = parts.length === 1 && parts[0].type ? ` ${parts[0].type}` : "";
+  const sourceText = x.source ? ` from ${x.source}` : "";
+  const hpText = a.kind === "character" || !secret ? "" : ` (${r.hp}/${max} HP)`;
+  // Players hear about their own side in full, and only that a visible monster fell. Numbers about monsters go to the DM.
+  if (a.kind === "character") {
+    postChat(cid, null, "text", { text: `💥 ${t.name} takes ${total}${typeText} damage${sourceText}${notes.length ? ` (${notes.join(", ")})` : ""}. HP ${r.hp}/${max}${r.temp ? ` +${r.temp} temp` : ""}.${r.dropped ? " Down!" : ""}${r.dead ? " Dead." : ""}${r.deathSaves && !r.dropped && !r.dead && before <= 0 ? ` Death save failures: ${r.deathSaves.failures}/3.` : ""}` });
+  } else {
+    postChat(cid, null, "text", { text: `💥 ${t.name} takes ${total}${typeText} damage${sourceText}${notes.length ? ` (${notes.join(", ")})` : ""}${hpText}.${r.dropped ? " Drops to 0." : ""}` }, dmIdOf(cid));
+    if (r.dropped && !t.hidden) postChat(cid, null, "text", { text: `☠ ${t.name} is down.` });
+  }
+  let conc: { tokenId: number; dc: number; spell: string } | null = null;
+  if (r.concentrationDC && String(t.concentrating)) {
+    conc = { tokenId: t.id, dc: r.concentrationDC, spell: String(t.concentrating) };
+    postChat(cid, null, "text", { text: `🔵 ${t.name} is concentrating on ${t.concentrating}: Constitution save, DC ${r.concentrationDC}, or the spell ends.` }, secret ? dmIdOf(cid) : null);
+  }
+  if (r.dropped && t.concentrating) { run("UPDATE tokens SET concentrating = '' WHERE id = ?", t.id); postChat(cid, null, "text", { text: `🔵 ${t.name} loses concentration on ${t.concentrating} (knocked out).` }, secret ? dmIdOf(cid) : null); conc = null; }
+  return { tokenId: t.id, name: t.name, dealt: total, hp: r.hp, max, temp: r.temp, notes: [...notes, ...r.notes], dropped: r.dropped, dead: r.dead, concentration: conc };
+}
+
+function healToken(cid: number, t: Row, amount: number) {
+  const a = buildActor(t);
+  const n = Math.max(0, Math.round(amount) || 0);
+  if (!n) throw new Error("Type an amount to heal");
+  const max = a.maxHp ?? Math.max(1, a.hp ?? 1);
+  const h = healHp({ hp: a.hp ?? 0, max, temp: a.tempHp, deathSaves: a.deathSaves ?? undefined, isCharacter: a.kind === "character" }, n);
+  writeHealth(t, { hp: h.hp, ...(h.deathSaves ? { deathSaves: h.deathSaves } : {}) });
+  if (h.revived) { removeCondition(t, "Unconscious"); removeCondition(t, "Dead"); }
+  postChat(cid, null, "text", { text: `💚 ${t.name} regains ${h.hp - (a.hp ?? 0)} HP${a.kind === "character" || !hiddenFromPlayers(t) ? ` (HP ${h.hp}/${max})` : ""}${h.revived ? " and is back on their feet" : ""}.` }, hiddenFromPlayers(t) ? dmIdOf(cid) : null);
+  return { hp: h.hp, max };
+}
+
+function giveTempHp(cid: number, t: Row, amount: number) {
+  const a = buildActor(t);
+  const n = Math.max(0, Math.round(amount) || 0);
+  if (!n) throw new Error("Type an amount");
+  const temp = gainTempHp(a.tempHp, n);
+  writeHealth(t, { temp });
+  postChat(cid, null, "text", { text: `🛡 ${t.name} has ${temp} temporary HP${temp === a.tempHp ? " (they don't stack: the higher number is kept)" : ""}.` }, hiddenFromPlayers(t) ? dmIdOf(cid) : null);
+  return { temp };
+}
+
+function rollDeathSave(cid: number, t: Row, manual: unknown) {
+  const a = buildActor(t);
+  if (a.kind !== "character" || !a.deathSaves) throw new Error("Only player characters make death saves");
+  if ((a.hp ?? 1) > 0) throw new Error(`${t.name} isn't at 0 HP`);
+  if (a.deathSaves.failures >= 3) throw new Error(`${t.name} is dead`);
+  const r = rollD20(0, "normal", manual);
+  const res = deathSave(a.deathSaves, r.natural);
+  writeHealth(t, { deathSaves: { successes: res.successes, failures: res.failures }, ...(res.outcome === "revived" ? { hp: 1 } : {}) });
+  if (res.outcome === "revived") removeCondition(t, "Unconscious");
+  if (res.outcome === "dead") addCondition(t, "Dead");
+  postChat(cid, null, "roll", { expression: r.expression, label: `${t.name}: death saving throw`, total: r.total, detail: `${r.detail} — ${res.text} (successes ${res.successes}/3, failures ${res.failures}/3)`, crit: r.crit, dice: r.dice, combat: { kind: "death", outcome: res.outcome } });
+  return { ok: true, natural: r.natural, ...res };
+}
+
+/** Remember that a chat message's damage has been applied, so it can't be applied twice. */
+function markApplied(cid: number, msgId: number) {
+  const row = one("SELECT * FROM chat WHERE id = ? AND campaign_id = ?", msgId, cid);
+  if (!row) return;
+  const body = parseJSON<any>(row.body, {});
+  if (!body.combat) return;
+  body.combat.applied = true;
+  run("UPDATE chat SET body = ? WHERE id = ?", JSON.stringify(body), msgId);
+  const msg = chatOut({ ...one("SELECT c.*, u.display_name AS name FROM chat c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?", msgId)! });
+  eachSocket(cid, (s, dd) => { if (canSee(msg, dd.user.id, !!dd.isDM)) s.emit("chat:update", msg); });
+}
+
+// ----- timed effects and turn reminders -----
+
+interface Effect { id: string; name: string; at: "start" | "end"; round: number; entryId: number | null; condition?: boolean }
+const effectsOf = (t: Row): Effect[] => parseJSON<Effect[]>(t.effects, []);
+const saveEffects = (t: Row, list: Effect[]) => { t.effects = JSON.stringify(list); run("UPDATE tokens SET effects = ? WHERE id = ?", t.effects, t.id); };
+function removeEffect(t: Row, name: string) { saveEffects(t, effectsOf(t).filter((e) => e.name.toLowerCase() !== name.toLowerCase())); }
+
+function loadInitiative(cid: number) {
+  return parseJSON<{ round: number; turn: number; entries: Row[] }>(one("SELECT initiative FROM campaigns WHERE id = ?", cid)?.initiative, { round: 1, turn: 0, entries: [] });
+}
+const entryOf = (state: { entries: Row[] }, t: Row) => state.entries.find((e) => e.tokenId === t.id) ?? state.entries.find((e) => String(e.name).toLowerCase() === String(t.name).toLowerCase());
+
+/** A timer on a token: "start" fires at the start of its turn, "end" at the end of it; `rounds` counts whole rounds from now. */
+function addEffect(cid: number, t: Row, e: { name: string; at: "start" | "end"; rounds: number; condition?: boolean }) {
+  const state = loadInitiative(cid);
+  const entry = entryOf(state, t);
+  if (!entry) return; // not in the turn order: nothing to count turns by
+  const isItsTurn = state.entries[state.turn]?.id === entry.id;
+  // its turn is already underway, so the next start (or end) that counts is a round later
+  const round = state.round + e.rounds + (isItsTurn && e.rounds === 0 ? 1 : 0);
+  const list = effectsOf(t).filter((x) => x.name.toLowerCase() !== e.name.toLowerCase());
+  list.push({ id: `${Date.now()}${Math.floor(Math.random() * 1000)}`, name: e.name, at: e.at, round, entryId: entry.id, condition: e.condition });
+  saveEffects(t, list);
+}
+
+/** Called after the turn order moves on: say which effects wear off and who needs to roll something. */
+export function turnChanged(cid: number, ev: { prev?: Row; prevRound: number; cur: Row; round: number }) {
+  const toks = tokensOnMap(cid);
+  const due = (t: Row, entry: Row | undefined, at: "start" | "end", round: number) => {
+    if (!entry) return [] as Effect[];
+    const list = effectsOf(t);
+    const fired = list.filter((e) => e.entryId === entry.id && e.at === at && round >= e.round);
+    if (fired.length) saveEffects(t, list.filter((e) => !fired.includes(e)));
+    return fired;
+  };
+  const say = (t: Row, text: string) => postChat(cid, null, "text", { text }, hiddenFromPlayers(t) ? dmIdOf(cid) : null);
+  for (const t of toks) {
+    for (const e of due(t, ev.prev && (ev.prev.tokenId === t.id || String(ev.prev.name).toLowerCase() === String(t.name).toLowerCase()) ? ev.prev : undefined, "end", ev.prevRound)) say(t, `⏰ End of ${t.name}'s turn: ${e.name} ${e.condition ? "should end now (remove it from the Combat tab, or roll the save if it says save ends)" : "has run out"}.`);
+    const isCur = ev.cur.tokenId === t.id || String(ev.cur.name).toLowerCase() === String(t.name).toLowerCase();
+    if (!isCur) continue;
+    for (const e of due(t, ev.cur, "start", ev.round)) say(t, `⏰ Start of ${t.name}'s turn: ${e.name} ${e.condition ? "should end now (remove it from the Combat tab, or roll the save if it says save ends)" : "has run out"}.`);
+    const a = buildActor(t);
+    if (a.kind === "character" && (a.hp ?? 1) <= 0 && (a.deathSaves?.failures ?? 0) < 3) postChat(cid, null, "text", { text: `💀 ${t.name} is at 0 HP: roll a death saving throw (Combat tab).` });
+    for (const act of a.actions) if (act.recharge && (a.used[act.id] ?? 0) > 0) postChat(cid, null, "text", { text: `🔁 ${t.name}'s ${act.name} is spent: roll recharge (${act.recharge}) from the Combat tab.` }, dmIdOf(cid));
+    if (t.concentrating && !hiddenFromPlayers(t)) postChat(cid, null, "text", { text: `🔵 ${t.name} is concentrating on ${t.concentrating}.` });
+  }
+}
+
+function tokensOnMap(cid: number): Row[] {
+  const c = one("SELECT active_map_id FROM campaigns WHERE id = ?", cid);
+  return c?.active_map_id ? (all("SELECT * FROM tokens WHERE map_id = ?", c.active_map_id) as Row[]) : [];
 }
 
 function handleRoll(d: SocketData, p: any) {

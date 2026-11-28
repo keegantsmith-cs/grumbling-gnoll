@@ -60,12 +60,12 @@ before(async () => {
   await sam.post("/register", { username: "sam", displayName: "Sam", password: "password1", inviteCode: code });
   await jo.post("/register", { username: "joanna", displayName: "Jo", password: "password1", inviteCode: code });
   const data = {
-    name: "Mirabel", classes: [{ name: "Fighter", subclass: "", level: 3 }], abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 8 }, saveProficiencies: ["str", "con"],
+    name: "Mirabel", hp: { max: 44, current: 44, temp: 0 }, classes: [{ name: "Fighter", subclass: "", level: 3 }], abilities: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 8 }, saveProficiencies: ["str", "con"],
     attacks: [{ name: "Longsword", bonus: "", damage: "", notes: "" }, { name: "Handaxe", bonus: "+5", damage: "1d6+3 slashing", notes: "" }],
     inventory: [{ name: "Chain Mail", qty: 1, weight: 55, equipped: true, attuned: false, notes: "" }],
   };
   charId = (await sam.post("/characters", { campaignId, data })).data.id;
-  joCharId = (await jo.post("/characters", { campaignId, data: { ...data, name: "Tobin" } })).data.id;
+  joCharId = (await jo.post("/characters", { campaignId, data: { ...data, name: "Tobin", hp: { max: 30, current: 30, temp: 0 } } })).data.id;
   for (const a of (await dm.get(`/campaigns/${campaignId}/approvals`)).data) await dm.post(`/changes/${a.id}/approve`, {});
   const mapId = (await dm.post(`/campaigns/${campaignId}/maps/generate`, { cols: 30, rows: 24, seed: 3, rooms: 6, theme: "stone", name: "Arena" })).data.id;
   await dm.post(`/campaigns/${campaignId}/active-map`, { mapId });
@@ -243,4 +243,155 @@ test("rolling: a breath weapon rolls damage once and a save for each target (typ
   assert.equal(back, true);
   assert.equal((await D.ask("combat:actor", { tokenId: dragonId })).actor.used[breath.id], undefined);
   D.s.close();
+});
+
+const hpOf = (L: Live, id: number) => L.last("map").tokens.find((t: any) => t.id === id);
+const resetSam = async (D: Live) => { D.s.emit("token:update", { id: samTokenId, hp: 44 }); await pause(150); };
+
+test("damage: the DM applies it with the stat block's resistances, and temp HP and half-on-a-save are worked out", async () => {
+  const D = await live(dm), S = await live(sam);
+  // Goblin has 7 HP and no defenses
+  let r = await D.ask("combat:apply", { targets: [{ tokenId: goblinId, parts: [{ amount: 4, type: "slashing" }] }] });
+  assert.equal(r.results[0].hp, 3);
+  r = await D.ask("combat:apply", { targets: [{ tokenId: goblinId, amount: 4, half: true }] });
+  assert.equal(r.results[0].hp, 1); // half of 4
+  // The dragon is immune to fire, so a fireball does nothing
+  r = await D.ask("combat:apply", { targets: [{ tokenId: dragonId, amount: 30, type: "fire" }, { tokenId: dragonId, amount: 10, type: "cold" }] });
+  assert.equal(r.results[0].dealt, 0);
+  assert.equal(r.results[1].dealt, 10);
+  assert.equal(r.results[1].hp, 246);
+  // players can't apply damage to others, but can to their own character
+  assert.ok((await S.ask("combat:apply", { targets: [{ tokenId: goblinId, amount: 5 }] })).error);
+  assert.ok((await S.ask("combat:apply", { targets: [{ tokenId: joTokenId, amount: 5 }] })).error);
+  assert.equal((await S.ask("combat:apply", { targets: [{ tokenId: samTokenId, amount: 5 }] })).results[0].hp, 39);
+  // temporary HP soaks up damage first and doesn't stack
+  await S.ask("combat:heal", { tokenId: samTokenId, amount: 5, temp: true });
+  await S.ask("combat:heal", { tokenId: samTokenId, amount: 3, temp: true });
+  r = await D.ask("combat:apply", { targets: [{ tokenId: samTokenId, amount: 8 }] });
+  assert.deepEqual([r.results[0].temp, r.results[0].hp], [0, 36]);
+  // healing never goes above the maximum
+  assert.equal((await S.ask("combat:heal", { tokenId: samTokenId, amount: 100 })).hp, 44);
+  // a monster can't be healed or damaged by a player
+  assert.ok((await S.ask("combat:heal", { tokenId: goblinId, amount: 3 })).error);
+  for (const x of [D, S]) x.s.close();
+});
+
+test("damage: an Apply button on a chat roll works once, then is marked applied for everyone", async () => {
+  const D = await live(dm), S = await live(sam);
+  const sword = await swordId(S);
+  await S.ask("combat:roll", { tokenId: samTokenId, kind: "attack", actionId: sword, targetId: joTokenId, manual: 15, withDamage: true, manualDamage: 6 });
+  await waitFor(() => D.all("chat").some((m) => m.body.combat?.apply));
+  const msg = D.all("chat").find((m) => m.body.combat?.apply);
+  const before = hpOf(D, joTokenId).hp;
+  const r = await D.ask("combat:apply", { msgId: msg.id, targets: [{ tokenId: joTokenId, parts: msg.body.combat.apply.parts }] });
+  assert.equal(r.results[0].hp, before - 6);
+  await waitFor(() => S.all("chat:update").some((m) => m.id === msg.id && m.body.combat.applied));
+  assert.equal(D.all("chat:update").find((m) => m.id === msg.id).body.combat.applied, true);
+  for (const x of [D, S]) x.s.close();
+});
+
+test("damage: monster numbers reach the DM only; players only hear that a monster fell", async () => {
+  const D = await live(dm), S = await live(sam);
+  await D.ask("combat:apply", { targets: [{ tokenId: dragonId, amount: 40, type: "cold" }] });
+  await pause();
+  assert.equal(has(S.all("chat"), "Adult Red Dragon takes"), false);
+  assert.equal(has(S.all("chat"), "246"), false);
+  assert.equal(tokenByName(S, "Adult Red Dragon").hp, null);
+  assert.equal(tokenByName(S, "Adult Red Dragon").health, "healthy"); // 206/256 is still more than half
+  await D.ask("combat:apply", { targets: [{ tokenId: dragonId, amount: 120, type: "cold" }] });
+  await waitFor(() => tokenByName(S, "Adult Red Dragon").health === "bloodied");
+  await D.ask("combat:apply", { targets: [{ tokenId: dragonId, amount: 70, type: "cold" }] });
+  await waitFor(() => tokenByName(S, "Adult Red Dragon").health === "near death");
+  assert.equal(has(S.all("map"), '"maxHp":256'), false);
+  await D.ask("combat:apply", { targets: [{ tokenId: goblinId, amount: 50 }] });
+  await waitFor(() => has(S.all("chat"), "Goblin is down") && tokenByName(S, "Goblin").hp === 0);
+  for (const x of [D, S]) x.s.close();
+});
+
+test("dropping to 0: a character falls unconscious, makes death saves, and healing brings them back", async () => {
+  const D = await live(dm), J = await live(jo);
+  const elowen = (await J.ask("combat:actor", { tokenId: joTokenId })).actor;
+  let r = await D.ask("combat:apply", { targets: [{ tokenId: joTokenId, amount: elowen.hp + 5 }] });
+  assert.equal(r.results[0].dropped, true);
+  assert.equal(r.results[0].hp, 0);
+  await waitFor(() => /Unconscious/.test(hpOf(J, joTokenId)?.conditions ?? ""));
+  assert.deepEqual(hpOf(J, joTokenId).deathSaves, { successes: 0, failures: 0 });
+  // damage while down is a death save failure, a crit is two
+  r = await D.ask("combat:apply", { targets: [{ tokenId: joTokenId, amount: 3 }] });
+  assert.equal((await J.ask("combat:actor", { tokenId: joTokenId })).actor.deathSaves.failures, 1);
+  // saves: typed 12 = success, typed 1 = two failures (now 3 = dead)
+  const ok = await J.ask("combat:roll", { tokenId: joTokenId, kind: "check", ability: "dex", manual: 5 });
+  assert.ok(ok.ok);
+  let ds = await J.ask("combat:death", { tokenId: joTokenId, manual: 12 });
+  assert.equal(ds.successes, 1);
+  ds = await J.ask("combat:death", { tokenId: joTokenId, manual: 1 });
+  assert.equal(ds.outcome, "dead");
+  assert.ok((await J.ask("combat:death", { tokenId: joTokenId, manual: 15 })).error); // already dead
+  // healing brings them back and clears the saves
+  const h = await D.ask("combat:heal", { tokenId: joTokenId, amount: 9 });
+  assert.equal(h.hp, 9);
+  const after = (await J.ask("combat:actor", { tokenId: joTokenId })).actor;
+  assert.deepEqual(after.deathSaves, { successes: 0, failures: 0 });
+  assert.equal(/Unconscious|Dead/.test(after.conditions), false);
+  // a natural 20 at 0 HP gets you up with 1 HP
+  await D.ask("combat:apply", { targets: [{ tokenId: joTokenId, amount: 20 }] });
+  const nat = await J.ask("combat:death", { tokenId: joTokenId, manual: 20 });
+  assert.equal(nat.outcome, "revived");
+  assert.equal((await J.ask("combat:actor", { tokenId: joTokenId })).actor.hp, 1);
+  // only characters at 0 HP can make death saves
+  assert.ok((await J.ask("combat:death", { tokenId: joTokenId, manual: 15 })).error);
+  assert.ok((await D.ask("combat:death", { tokenId: goblinId })).error);
+  for (const x of [D, J]) x.s.close();
+});
+
+test("concentration: damage to a concentrating creature reminds everyone of the Constitution save; failing it ends the spell", async () => {
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  await resetSam(D);
+  await S.ask("combat:set", { tokenId: samTokenId, concentrating: "Bless" });
+  await waitFor(() => hpOf(J, samTokenId).concentrating === "Bless");
+  const r = await D.ask("combat:apply", { targets: [{ tokenId: samTokenId, amount: 30 }] });
+  assert.equal(r.results[0].concentration.dc, 15);
+  await waitFor(() => has(J.all("chat"), "DC 15"));
+  const fail = await S.ask("combat:roll", { tokenId: samTokenId, kind: "save", ability: "con", dc: 15, manual: 2, concentration: true });
+  assert.equal(fail.success, false);
+  assert.equal(fail.dropped, "Bless");
+  await waitFor(() => !hpOf(J, samTokenId).concentrating);
+  // a hidden monster's concentration is nobody else's business
+  D.s.emit("token:update", { id: goblinId, hp: 7 });
+  await D.ask("combat:set", { tokenId: goblinId, concentrating: "Hold Person" });
+  await pause();
+  assert.equal(has(S.all("map"), "Hold Person"), false);
+  assert.equal(has(S.all("chat"), "Hold Person"), false);
+  await resetSam(D);
+  for (const x of [D, S, J]) x.s.close();
+});
+
+test("conditions: added with a timer, shown to everyone, and the table is reminded when they should end", async () => {
+  const D = await live(dm), S = await live(sam), J = await live(jo);
+  D.s.emit("initiative", { op: "clear" });
+  D.s.emit("initiative", { op: "add", name: "Mirabel", init: 18, tokenId: samTokenId });
+  D.s.emit("initiative", { op: "add", name: "Goblin", init: 12, tokenId: goblinId });
+  D.s.emit("initiative", { op: "add", name: "Tobin", init: 5, tokenId: joTokenId });
+  await waitFor(() => (D.last("initiative")?.entries?.length ?? 0) === 3);
+  // Sam is up (turn 0). The DM makes the goblin prone until the end of its next turn; players can't do that to others
+  assert.ok((await S.ask("combat:condition", { tokenId: goblinId, op: "add", name: "Prone" })).error);
+  assert.ok((await D.ask("combat:condition", { tokenId: goblinId, op: "add", name: "Prone", ends: { kind: "end" } })).ok);
+  assert.ok((await S.ask("combat:condition", { tokenId: samTokenId, op: "add", name: "Poisoned" })).ok);
+  await waitFor(() => /Prone/.test(tokenByName(S, "Goblin")?.conditions ?? "") && /Poisoned/.test(tokenByName(J, "Mirabel")?.conditions ?? ""));
+  // Next turn is the goblin's (nothing yet), and when it ends the prone is due
+  const next = async () => { const n = D.all("chat").length; D.s.emit("initiative", { op: "next" }); await pause(200); return D.all("chat").slice(n); };
+  let msgs = await next();
+  assert.equal(has(msgs, "Prone"), false);
+  msgs = await next();
+  assert.equal(has(msgs, "Prone"), true);
+  assert.equal(has(S.all("chat"), "Prone"), false); // the goblin is a secret monster: only the DM hears about it
+  // players are told about their own character's effects: "for 1 round" fires at the start of Mirabel's next turn
+  assert.ok((await S.ask("combat:condition", { tokenId: samTokenId, op: "add", name: "Frightened", ends: { kind: "rounds", rounds: 1 } })).ok);
+  await next();
+  await waitFor(() => has(S.all("chat"), "Frightened"));
+  // removing a condition
+  assert.ok((await S.ask("combat:condition", { tokenId: samTokenId, op: "remove", name: "Poisoned" })).ok);
+  await waitFor(() => !/Poisoned/.test(tokenByName(J, "Mirabel").conditions));
+  D.s.emit("initiative", { op: "clear" });
+  for (const x of [D, S, J]) x.s.close();
 });

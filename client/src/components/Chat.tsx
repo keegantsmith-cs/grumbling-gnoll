@@ -30,7 +30,7 @@ export function ChatPanel({ campaign, live }: { campaign: Campaign; live: Campai
     <>
       <div className="chat-log" ref={logRef}>
         {live.chat.length === 0 && <p className="muted">No messages yet. Click a die below to roll, or type <code>/r 1d20+3</code> in the message box.</p>}
-        {live.chat.map((m) => <Message key={m.id} m={m} />)}
+        {live.chat.map((m) => <Message key={m.id} m={m} live={live} isDM={campaign.isDM} />)}
       </div>
       <div className="dice-bar" role="group" aria-label="Quick dice">
         {DICE.map((d) => <button key={d} onClick={() => roll(`1${d}`)} aria-label={`Roll ${d}`}>{d}</button>)}
@@ -60,8 +60,8 @@ export function ChatPanel({ campaign, live }: { campaign: Campaign; live: Campai
   );
 }
 
-function Message({ m }: { m: ChatMsg }) {
-  const { status } = useStatus();
+function Message({ m, live, isDM }: { m: ChatMsg; live: CampaignSocket; isDM: boolean }) {
+  const { status, toast } = useStatus();
   const whisper = m.whisperTo != null;
   const cls = `chat-msg${whisper ? " whisper" : ""}${m.kind === "share" ? " share" : ""}`;
   const time = new Date(m.createdAt.replace(" ", "T") + "Z").toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -83,6 +83,8 @@ function Message({ m }: { m: ChatMsg }) {
           </span>
         </div>
         {m.body.combat && <CombatBadge c={m.body.combat} />}
+        {isDM && m.body.combat?.apply && <ApplyBar c={m.body.combat} msgId={m.id} live={live} toast={toast} />}
+        {m.body.combat?.applied && <div className="muted" style={{ fontSize: 12 }}>✔ Damage applied</div>}
         {m.body.crit === "success" && <div style={{ color: "#8fe07a", fontSize: 12 }}>Natural 20!</div>}
         {m.body.crit === "fail" && <div style={{ color: "#ff7a63", fontSize: 12 }}>Natural 1...</div>}
       </div>
@@ -118,4 +120,26 @@ function CombatBadge({ c }: { c: any }) {
   }
   if (c.kind === "damage" && c.targets?.length) return <div className="combat-badge">→ {c.targets.map((t: any) => t.name).join(", ")}</div>;
   return null;
+}
+
+/** The DM's one-click "apply this damage" under an attack, damage roll or breath weapon. */
+function ApplyBar({ c, msgId, live, toast }: { c: any; msgId: number; live: CampaignSocket; toast: (m: string) => void }) {
+  if (c.applied) return null;
+  const a = c.apply as { tokenIds: number[]; parts: { amount: number; type: string }[]; magical?: boolean; crit?: boolean; source?: string; halfFor?: number[]; noneFor?: number[] };
+  const names = new Map<number, string>((live.map?.tokens ?? []).map((t) => [t.id, t.name]));
+  const send = (half: boolean) => {
+    const targets = a.tokenIds.filter((id) => !(a.noneFor ?? []).includes(id)).map((id) => ({ tokenId: id, parts: a.parts, magical: a.magical, crit: a.crit && !half, source: a.source, half: half || (a.halfFor ?? []).includes(id) }));
+    live.socket?.emit("combat:apply", { msgId, targets }, (r: any) => {
+      if (r?.error) return toast(r.error);
+      toast((r.results as any[]).map((x) => `${x.name}: −${x.dealt} → ${x.hp}/${x.max}${x.dead ? " dead" : x.dropped ? " down" : ""}`).join(" · "));
+    });
+  };
+  const total = a.parts.reduce((n, p) => n + p.amount, 0);
+  const saves = c.kind === "saveall";
+  return (
+    <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+      <button className="small danger" onClick={() => send(false)} title="Resistance, vulnerability and immunity from the stat block are worked out for you">💥 Apply {total}{a.parts.length === 1 && a.parts[0].type ? ` ${a.parts[0].type}` : ""} to {a.tokenIds.map((id) => names.get(id) ?? "?").join(", ")}{saves ? " (saves counted)" : ""}</button>
+      {!saves && <button className="small" onClick={() => send(true)} title="They made their save">½ half</button>}
+    </div>
+  );
 }

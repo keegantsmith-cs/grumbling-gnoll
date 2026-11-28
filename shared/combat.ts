@@ -509,4 +509,6 @@ export interface Actor {
   /** Spell slots left per level 1-9 (characters) */
   slotsLeft?: number[];
   pactLeft?: { count: number; level: number };
+  /** Timers on this creature: conditions and effects that should end at a certain turn */
+  effects: { name: string; at: "start" | "end"; round: number; condition?: boolean }[];
 }

@@ -6,8 +6,7 @@ import { COOKIE, campaignRole, userFromToken } from "./auth.ts";
 import { describeRoll, diceList, rollDice } from "../shared/dice.ts";
 import { derive, normalizeCharacter } from "../shared/character.ts";
 import { discordChat, discordCombatEnd, discordTurn } from "./discord.ts";
-import { buildActor, controlsToken, publicHealth, registerCombat } from "./combat.ts";
-import { STANDARD_OPTIONS } from "../shared/combat.ts";
+import { publicHealth, registerCombat, turnChanged } from "./combat.ts";
 import type { MonsterCombat } from "../shared/combat.ts";
 
 let io: Server;
@@ -131,11 +130,11 @@ function tokenOut(t: Row, isDM: boolean) {
   };
 }
 
-function chatOut(c: Row) {
+export function chatOut(c: Row) {
   return { id: c.id, userId: c.user_id, name: c.name ?? "System", kind: c.kind, body: parseJSON(c.body, {}), whisperTo: c.whisper_to, createdAt: c.created_at };
 }
 
-function canSee(msg: { userId: number | null; whisperTo: number | null }, userId: number, isDM: boolean) {
+export function canSee(msg: { userId: number | null; whisperTo: number | null }, userId: number, isDM: boolean) {
   if (msg.whisperTo == null) return true;
   return isDM || msg.userId === userId || msg.whisperTo === userId;
 }
@@ -313,26 +312,6 @@ export function initRealtime(server: HttpServer) {
 
     registerCombat(socket);
 
-    // ---- combat: the acting creature's attacks and numbers (only for the DM or whoever controls the token) ----
-    socket.on("combat:actor", (p: { tokenId: number }, ack?: (r: unknown) => void) => {
-      if (typeof ack !== "function") return;
-      if (!d.campaignId) return ack({ error: "Not in a campaign" });
-      const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
-      if (!t) return ack({ error: "That token isn't on the map any more" });
-      if (!controlsToken(t, d.user.id, !!d.isDM)) return ack({ error: "That isn't your token" });
-      ack({ actor: buildActor(t) });
-    });
-
-    // "Dash", "Dodge"... just announced in chat so everyone at the table knows what was chosen
-    socket.on("combat:do", (p: { tokenId: number; key: string }) => {
-      if (!d.campaignId) return;
-      const t = tokenOnActiveMap(Number(p?.tokenId), d.campaignId);
-      const opt = STANDARD_OPTIONS.find((o) => o.key === p?.key);
-      if (!t || !opt || !controlsToken(t, d.user.id, !!d.isDM)) return;
-      // A hidden monster doing something stays between you and the DM
-      postChat(d.campaignId, d.user.id, "text", { text: `⚔ ${t.name}: ${opt.label}. ${opt.hint}` }, t.hidden ? dmIdOf(d.campaignId) : null);
-    });
-
     socket.on("ping", (p: { x: number; y: number }) => {
       if (!d.campaignId) return;
       io.to(room(d.campaignId)).emit("ping", { x: Number(p.x), y: Number(p.y), name: d.user.display_name, userId: d.user.id });
@@ -506,6 +485,7 @@ export function initRealtime(server: HttpServer) {
       if (!d.campaignId) return;
       const c = one("SELECT initiative FROM campaigns WHERE id = ?", d.campaignId)!;
       const state = parseJSON<{ round: number; turn: number; entries: Row[] }>(c.initiative, { round: 1, turn: 0, entries: [] });
+      let prevEntry: Row | undefined, prevRound = state.round;
       const sortEntries = () => state.entries.sort((a, b) => b.init - a.init || (b.dex ?? 0) - (a.dex ?? 0));
       if (p.op === "roll") {
         // Server rolls initiative so nobody can fudge it: d20 + bonus, posted to chat too.
@@ -538,6 +518,7 @@ export function initRealtime(server: HttpServer) {
         sortEntries();
       } else if (p.op === "next") {
         if (state.entries.length) {
+          prevEntry = state.entries[state.turn]; prevRound = state.round;
           state.turn++;
           let newRound = false;
           if (state.turn >= state.entries.length) { state.turn = 0; state.round++; newRound = true; }
@@ -553,6 +534,8 @@ export function initRealtime(server: HttpServer) {
       }
       run("UPDATE campaigns SET initiative = ? WHERE id = ?", JSON.stringify(state), d.campaignId);
       broadcastInitiative(d.campaignId);
+      // Reminders: effects that wear off, death saves, recharge rolls
+      if (p.op === "next" && state.entries.length) turnChanged(d.campaignId, { prev: prevEntry, prevRound, cur: state.entries[state.turn], round: state.round });
     });
   });
 }

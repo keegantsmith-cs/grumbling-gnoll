@@ -449,7 +449,7 @@ function TokenNode({ t, map, scale, draggable, selected, onSelect, onMove }: { t
           <Rect x={-r} y={-r - 9} width={r * 2 * hpPct} height={6} fill={hpPct > 0.5 ? "#5cb85c" : hpPct > 0.25 ? "#e0a030" : "#d9534f"} cornerRadius={3} />
         </>
       )}
-      {t.conditions && <Text text="●" fill="#c77dff" fontSize={r * 0.6} x={r * 0.5} y={-r} />}
+      <TokenBadges t={t} r={r} />
       {t.hp != null && t.hp <= 0 && (
         <>
           <Line points={[-r * 0.6, -r * 0.6, r * 0.6, r * 0.6]} stroke="#d9534f" strokeWidth={r * 0.18} lineCap="round" />
@@ -457,6 +457,38 @@ function TokenNode({ t, map, scale, draggable, selected, onSelect, onMove }: { t
         </>
       )}
     </Group>
+  );
+}
+
+/** Condition letters, concentration, temporary HP, AC and death saves drawn on the token itself. */
+function TokenBadges({ t, r }: { t: Token; r: number }) {
+  const conds = t.conditions.split(",").map((c) => c.trim()).filter(Boolean).slice(0, 4);
+  const d = Math.max(14, r * 0.5);
+  const down = t.hp != null && t.hp <= 0 && t.characterId != null && t.deathSaves;
+  return (
+    <>
+      {conds.map((c, i) => (
+        <Group key={c} x={r * 0.55 + (i % 2) * d * 0.9} y={-r + Math.floor(i / 2) * d * 0.9}>
+          <Circle radius={d / 2} fill="#7a3fa0" stroke="#111" strokeWidth={1} />
+          <Text text={c.slice(0, 1).toUpperCase()} fontSize={d * 0.6} fill="#fff" fontStyle="bold" width={d} x={-d / 2} y={-d * 0.3} align="center" />
+        </Group>
+      ))}
+      {t.concentrating && (
+        <Group x={-r * 0.8} y={-r * 0.6}>
+          <Circle radius={d / 2} fill="#2a6fc7" stroke="#111" strokeWidth={1} />
+          <Text text="C" fontSize={d * 0.6} fill="#fff" fontStyle="bold" width={d} x={-d / 2} y={-d * 0.3} align="center" />
+        </Group>
+      )}
+      {t.hp == null && t.health && t.health !== "healthy" && <Text text={t.health} fontSize={Math.max(11, r * 0.4)} fill={t.health === "bloodied" ? "#f0b050" : "#ff7a63"} fontStyle="bold" width={r * 2} x={-r} y={-r - 16} align="center" />}
+      {!!t.tempHp && <Text text={`+${t.tempHp}`} fontSize={Math.max(11, r * 0.4)} fill="#7fc4ff" fontStyle="bold" x={-r} y={-r - 24} />}
+      {t.ac != null && (
+        <Group x={r * 0.7} y={r * 0.7}>
+          <Circle radius={d * 0.62} fill="#33291f" stroke="#e3b866" strokeWidth={1} />
+          <Text text={String(t.ac)} fontSize={d * 0.62} fill="#e3b866" fontStyle="bold" width={d * 1.4} x={-d * 0.7} y={-d * 0.3} align="center" />
+        </Group>
+      )}
+      {down && <Text text={`${"✓".repeat(t.deathSaves!.successes)}${"✗".repeat(t.deathSaves!.failures)}` || "☠"} fontSize={Math.max(12, r * 0.45)} fill="#ff9b85" fontStyle="bold" width={r * 2} x={-r} y={r * 0.1} align="center" />}
+    </>
   );
 }
 

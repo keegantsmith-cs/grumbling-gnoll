@@ -49,6 +49,7 @@ export function useCampaignSocket(campaignId: number, onToast: (m: string) => vo
       setChat((c) => [...c.slice(-300), msg]);
       if (msg.kind === "roll") announceRoll({ name: msg.name, body: msg.body });
     });
+    s.on("chat:update", (msg: ChatMsg) => setChat((c) => c.map((m) => (m.id === msg.id ? msg : m))));
     s.on("initiative", setInitiative);
     s.on("presence", setPresence);
     s.on("toast", (m: string) => toastRef.current(m));

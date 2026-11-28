@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { ABILITIES, ABILITY_NAMES, SKILLS, fmtMod, type Ability } from "../../../shared/character";
-import { CONDITIONS, STANDARD_OPTIONS, type Actor, type CombatAction } from "../../../shared/combat";
+import { CONDITIONS, DAMAGE_TYPES, STANDARD_OPTIONS, type Actor, type CombatAction } from "../../../shared/combat";
 import type { CampaignSocket, InitEntry, Token } from "../socket";
 import type { Campaign } from "../pages/Campaign";
 import { useStatus } from "../hooks";
@@ -79,6 +79,7 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
   // forget targets that left the map
   useEffect(() => { setTargets((ts) => ts.filter((id) => tokens.some((t) => t.id === id))); }, [tokens.length]);
 
+  const emit: Emit = (event, payload, cb) => live.socket?.emit(event, payload, (r: any) => { if (r?.error) toast(r.error); else cb?.(r); load(); });
   const say = (key: string) => token && live.socket?.emit("combat:do", { tokenId: token.id, key });
   const monsterActing = !!actor && actor.kind === "monster";
   const visibilityNote = campaign.isDM ? (monsterActing || token?.hidden ? (hidden ? "Everyone will see these rolls" : "Only you see these rolls") : "Everyone sees these rolls") : hidden ? "Only you and the DM see these rolls" : "Everyone sees these rolls";
@@ -147,6 +148,7 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
   function slotFor(a: CombatAction) { return !a.level ? 0 : slots[a.id] ?? a.level; }
 
   const candidates = campaign.isDM ? tokens : tokens;
+  const healthIds = campaign.isDM ? (targets.length ? targets : token ? [token.id] : []) : token ? [token.id] : [];
   const toggleTarget = (id: number) => setTargets((ts) => (ts.includes(id) ? ts.filter((x) => x !== id) : [...ts, id]));
 
   return (
@@ -167,7 +169,9 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
 
       {token && canAct && actor && (
         <>
-          <Summary t={token} actor={actor} isDM={campaign.isDM} />
+          <Summary t={token} actor={actor} isDM={campaign.isDM} emit={emit}
+            onDeath={() => withOwnDice("Death saving throw", [{ key: "d20", label: "Death save: what did your d20 show?" }], (v) => emit("combat:death", { tokenId: token.id, manual: nums(v.d20) }, (r) => setLast({ text: r.text + ` (${r.successes} successes, ${r.failures} failures)`, tone: r.outcome === "failure" || r.outcome === "dead" ? "bad" : "good" })))}
+            onConc={(dc) => doRoll({ kind: "save", ability: "con", dc, concentration: true }, (r) => setLast({ text: `Concentration save: ${r.total} vs DC ${dc} — ${r.success ? "kept" : `lost${r.dropped ? ` ${r.dropped}` : ""}`}`, tone: r.success ? "good" : "bad" }))} />
           {actor.notes.map((n, i) => <p key={i} className="muted" style={{ fontSize: 12 }}>{n}</p>)}
 
           <div className="roll-controls">
@@ -193,6 +197,9 @@ export function CombatPanel({ campaign, live, tokenId, setTokenId }: { campaign:
               {candidates.filter((t) => !targets.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}{!t.characterId && t.health && t.health !== "healthy" ? ` (${t.health})` : ""}</option>)}
             </select>
           </div>
+
+          <div className="group-label">Damage &amp; healing</div>
+          <DamageBox ids={healthIds} names={healthIds.map((id) => tokens.find((x) => x.id === id)?.name ?? "?")} isDM={campaign.isDM} emit={emit} defenses={campaign.isDM} />
 
           {prompt && <OwnDicePrompt p={prompt} cancel={() => setPrompt(null)} />}
           {last && <div className={`last-result ${last.tone}`} role="status">
@@ -294,24 +301,124 @@ function OwnDicePrompt({ p, cancel }: { p: Prompt; cancel: () => void }) {
   );
 }
 
-function Summary({ t, actor, isDM }: { t: Token; actor: Actor; isDM: boolean }) {
+type Emit = (event: string, payload: Record<string, unknown>, cb?: (r: any) => void) => void;
+
+const DURATIONS: { key: string; label: string }[] = [
+  { key: "none", label: "until removed" },
+  { key: "start", label: "until the start of its next turn" },
+  { key: "end", label: "until the end of its next turn" },
+  { key: "rounds", label: "for a number of rounds…" },
+];
+
+function Summary({ t, actor, isDM, emit, onDeath, onConc }: { t: Token; actor: Actor; isDM: boolean; emit: Emit; onDeath: () => void; onConc: (dc: number) => void }) {
   const conds = t.conditions.split(",").map((c) => c.trim()).filter(Boolean);
+  const [cond, setCond] = useState("");
+  const [custom, setCustom] = useState("");
+  const [dur, setDur] = useState("none");
+  const [rounds, setRounds] = useState("10");
+  const [dc, setDc] = useState("10");
+  const [conc, setConc] = useState("");
+  const down = actor.kind === "character" && (actor.hp ?? 1) <= 0;
+  const ds = actor.deathSaves;
+  const timer = (name: string) => actor.effects.find((e) => e.name.toLowerCase() === name.toLowerCase());
+  const addCond = () => {
+    const name = (cond === "__custom" ? custom : cond).trim();
+    if (!name) return;
+    emit("combat:condition", { tokenId: t.id, op: "add", name, ends: dur === "none" ? undefined : { kind: dur, rounds: Number(rounds) || 1 } }, (r) => { if (r.warning) alert(r.warning); setCond(""); setCustom(""); });
+  };
   return (
     <div className="combat-summary">
       <div className="row" style={{ gap: 8 }}>
         <b className="grow">{actor.name}</b>
-        {actor.ac != null && <span className="pill" title="Armor Class">🛡 AC {actor.ac}</span>}
+        {isDM && actor.kind === "monster"
+          ? <label className="inline" style={{ margin: 0 }} title="Armor Class (only you see a monster's AC)">🛡 AC <input type="number" key={actor.ac ?? "x"} defaultValue={actor.ac ?? ""} style={{ width: 54, padding: 2 }} onBlur={(e) => emit("combat:set", { tokenId: t.id, ac: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+          : actor.ac != null && <span className="pill" title="Armor Class">🛡 AC {actor.ac}</span>}
       </div>
       <div className="row" style={{ gap: 8, margin: "4px 0" }}>
         <HpBar t={{ ...t, hp: actor.hp, maxHp: actor.maxHp, tempHp: actor.tempHp }} />
         {isDM && actor.kind === "monster" && <span className="muted" style={{ fontSize: 12 }}>only you see these numbers</span>}
       </div>
-      {(conds.length > 0 || actor.concentrating) && (
-        <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-          {actor.concentrating && <span className="pill warn" title="Concentrating">🔵 {actor.concentrating}</span>}
-          {conds.map((c) => <span key={c} className="pill bad">{c}</span>)}
+
+      {down && ds && (
+        <div className="death-saves" role="group" aria-label="Death saving throws">
+          <b>☠ Death saves</b>
+          <span title="Successes">{[0, 1, 2].map((i) => <span key={i} className={i < ds.successes ? "dot ok" : "dot"}>✓</span>)}</span>
+          <span title="Failures">{[0, 1, 2].map((i) => <span key={i} className={i < ds.failures ? "dot bad" : "dot"}>✗</span>)}</span>
+          {ds.failures < 3 ? <button className="small primary" onClick={onDeath}>🎲 Roll death save</button> : <span className="pill bad">dead</span>}
         </div>
       )}
+
+      <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 4 }} aria-label="Conditions">
+        {conds.length === 0 && !actor.concentrating && <span className="muted" style={{ fontSize: 12 }}>No conditions</span>}
+        {conds.map((c) => {
+          const e = timer(c);
+          return <span key={c} className="pill bad cond-chip" title={e ? `Reminder: ${e.at} of its turn, round ${e.round}` : "Until removed"}>{c}{e ? " ⏰" : ""} <button className="link" aria-label={`Remove ${c}`} onClick={() => emit("combat:condition", { tokenId: t.id, op: "remove", name: c })}>✕</button></span>;
+        })}
+        {actor.concentrating && <span className="pill warn cond-chip" title="Concentrating">🔵 {actor.concentrating} <button className="link" aria-label="Stop concentrating" onClick={() => emit("combat:set", { tokenId: t.id, concentrating: "" })}>✕</button></span>}
+      </div>
+
+      <details className="combat-more">
+        <summary>＋ Condition, timer &amp; concentration</summary>
+        <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+          <select aria-label="Condition" value={cond} onChange={(e) => setCond(e.target.value)} style={{ width: "auto" }}>
+            <option value="">Add a condition…</option>
+            {CONDITIONS.map((c) => <option key={c}>{c}</option>)}
+            <option value="__custom">Something else…</option>
+          </select>
+          {cond === "__custom" && <input aria-label="Custom condition" placeholder="e.g. Hexed" value={custom} onChange={(e) => setCustom(e.target.value)} style={{ width: 110 }} />}
+          <select aria-label="How long it lasts" value={dur} onChange={(e) => setDur(e.target.value)} style={{ width: "auto" }}>{DURATIONS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</select>
+          {dur === "rounds" && <input aria-label="Rounds" type="number" min={1} value={rounds} onChange={(e) => setRounds(e.target.value)} style={{ width: 60 }} />}
+          <button className="small primary" disabled={!cond || (cond === "__custom" && !custom.trim())} onClick={addCond}>Add</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12, margin: "4px 0" }}>With a timer, the table gets a reminder in chat when it should end. Nothing is removed for you.</div>
+        {actor.concentrating ? (
+          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+            <span>🔵 Concentrating on {actor.concentrating}.</span>
+            <label className="inline" style={{ margin: 0 }}>Save DC <input type="number" value={dc} onChange={(e) => setDc(e.target.value)} style={{ width: 56, padding: 2 }} /></label>
+            <button className="small" onClick={() => onConc(Number(dc) || 10)}>🎲 Roll Con save</button>
+          </div>
+        ) : (
+          <div className="row" style={{ gap: 4 }}>
+            <input aria-label="Concentrating on" placeholder="Concentrating on… (e.g. Bless)" value={conc} onChange={(e) => setConc(e.target.value)} />
+            <button className="small" disabled={!conc.trim()} onClick={() => { emit("combat:set", { tokenId: t.id, concentrating: conc.trim() }); setConc(""); }}>Set</button>
+          </div>
+        )}
+      </details>
+    </div>
+  );
+}
+
+/** Damage, healing and temporary HP for the targets (or for the acting creature when none are picked). */
+function DamageBox({ names, ids, isDM, emit, defenses }: { names: string[]; ids: number[]; isDM: boolean; emit: Emit; defenses: boolean }) {
+  const [amt, setAmt] = useState("");
+  const [type, setType] = useState("");
+  const [half, setHalf] = useState<number[]>([]);
+  const [msg, setMsg] = useState("");
+  const n = Math.abs(Math.round(Number(amt) || 0));
+  const summarize = (rs: any[]) => rs.map((r) => `${r.name}: −${r.dealt}${r.notes?.length ? ` (${r.notes.join(", ")})` : ""} → ${r.hp}/${r.max}${r.dead ? " dead" : r.dropped ? " down" : ""}${r.concentration ? ` · concentration check DC ${r.concentration.dc}` : ""}`).join("; ");
+  const damage = () => { if (!n) return; emit("combat:apply", { targets: ids.map((id) => ({ tokenId: id, amount: n, type, half: half.includes(id) })) }, (r) => { setMsg(summarize(r.results)); setAmt(""); setHalf([]); }); };
+  const healAll = () => { if (!n) return; ids.forEach((id) => emit("combat:heal", { tokenId: id, amount: n })); setMsg(`Healed ${names.join(", ")} for ${n}`); setAmt(""); };
+  const tempAll = () => { if (!n) return; ids.forEach((id) => emit("combat:heal", { tokenId: id, amount: n, temp: true })); setMsg(`${names.join(", ")}: temporary HP ${n}`); setAmt(""); };
+  return (
+    <div className="damage-box">
+      <div className="muted" style={{ fontSize: 12 }}>On: <b>{names.join(", ") || "—"}</b></div>
+      <div className="row" style={{ gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+        <input type="number" min={0} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="Amount" aria-label="Damage or healing amount" style={{ width: 80 }} onKeyDown={(e) => e.key === "Enter" && damage()} />
+        {isDM && <select aria-label="Damage type" value={type} onChange={(e) => setType(e.target.value)} style={{ width: "auto" }} title={defenses ? "Resistance, vulnerability and immunity are applied from the stat block" : "Damage type"}>
+          <option value="">type…</option>{DAMAGE_TYPES.map((d) => <option key={d}>{d}</option>)}
+        </select>}
+        <button className="small danger" disabled={!n} onClick={damage}>💥 Damage</button>
+        <button className="small" disabled={!n} onClick={healAll}>💚 Heal</button>
+        <button className="small" disabled={!n} onClick={tempAll} title="Temporary hit points (don't stack: the higher number is kept)">🛡 Temp HP</button>
+      </div>
+      {isDM && ids.length > 1 && (
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+          <span className="muted" style={{ fontSize: 12 }}>Saved (half damage):</span>
+          {ids.map((id, i) => <label key={id} className="inline" style={{ margin: 0, fontSize: 13 }}><input type="checkbox" checked={half.includes(id)} onChange={() => setHalf(half.includes(id) ? half.filter((x) => x !== id) : [...half, id])} /> {names[i]}</label>)}
+        </div>
+      )}
+      {isDM && ids.length === 1 && <label className="inline" style={{ margin: "4px 0 0", fontSize: 13 }}><input type="checkbox" checked={half.includes(ids[0])} onChange={() => setHalf(half.length ? [] : [ids[0]])} /> Saved: half damage</label>}
+      {msg && <div className="muted" style={{ fontSize: 12, marginTop: 4 }} role="status">{msg}</div>}
     </div>
   );
 }
