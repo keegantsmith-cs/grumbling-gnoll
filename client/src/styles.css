@@ -312,3 +312,8 @@ td.actions-cell button { margin-left: 4px; }
   td.actions-cell button { margin: 0 4px 0 0; }
   button.preset { max-width: none; flex-basis: 100%; }
 }
+
+/* Roll buttons on sheets you can't edit (not real buttons, so they work inside a switched-off form) */
+.small-roll { display: inline-block; cursor: pointer; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font-size: 13px; user-select: none; }
+.small-roll:hover, .small-roll:focus-visible { border-color: var(--gold); outline: none; }
+@media (max-width: 900px) { .small-roll { min-height: 36px; display: inline-flex; align-items: center; } }

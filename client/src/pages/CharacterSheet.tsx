@@ -180,7 +180,7 @@ export function CharacterPage({ id, roll, onDone }: { id: number; roll?: Roll; o
           {/* Attacks, spells, gear, story */}
           <div>
             <FullBody url={d.fullBodyUrl} canEdit={canEdit} characterId={id} name={d.name} onChange={(fullBodyUrl) => play({ fullBodyUrl }, { fullBodyUrl })} />
-            <AttacksEditor d={d} dv={dv} upd={upd} roll={r} />
+            <AttacksEditor d={d} dv={dv} upd={upd} roll={r} canEdit={canEdit} />
             <SpellsEditor d={d} dv={dv} upd={upd} play={play} />
             <InventoryEditor d={d} dv={dv} upd={upd} />
             <div className="card">
@@ -311,7 +311,7 @@ function ClassesEditor({ classes, rules, onChange }: { classes: ClassLevel[]; ru
   );
 }
 
-function AttacksEditor({ d, dv, upd, roll }: { d: CharacterData; dv: ReturnType<typeof derive>; upd: (p: Partial<CharacterData>) => void; roll: Roll }) {
+function AttacksEditor({ d, dv, upd, roll, canEdit }: { d: CharacterData; dv: ReturnType<typeof derive>; upd: (p: Partial<CharacterData>) => void; roll: Roll; canEdit: boolean }) {
   const set = (i: number, k: string, v: string) => upd({ attacks: d.attacks.map((a, j) => (j === i ? { ...a, [k]: v } : a)) });
   // Fill in bonus and damage from an SRD weapon or spell, using this character's numbers
   const fromSrd = (i: number, e: SrdEntry) => {
@@ -329,6 +329,27 @@ function AttacksEditor({ d, dv, upd, roll }: { d: CharacterData; dv: ReturnType<
     }
     upd({ attacks: d.attacks.map((a, j) => (j === i ? { ...a, name: e.name, bonus, damage, notes } : a)) });
   };
+  const hitExpr = (a: { bonus: string }) => `1d20${a.bonus && !a.bonus.startsWith("-") && !a.bonus.startsWith("+") ? "+" : ""}${a.bonus || "+0"}`;
+  // A sheet you can't edit (someone else's, or a locked one) still lets you roll: plain text plus roll buttons
+  // that aren't real <button>s, because the whole form is switched off for people who can't edit.
+  if (!canEdit) {
+    return (
+      <div className="card">
+        <h3>Attacks</h3>
+        {d.attacks.length === 0 && <p className="muted">No attacks listed.</p>}
+        {d.attacks.map((a, i) => (
+          <div key={i} className="row" style={{ marginBottom: 4, alignItems: "center" }}>
+            <b className="grow">{a.name || "Attack"}</b>
+            <span className="muted">{a.bonus || "+0"} to hit</span>
+            <span className="muted">{a.damage || "no damage listed"}</span>
+            <span className="small-roll" {...rollable(`${a.name || "attack"} to hit`, () => roll(hitExpr(a), `${d.name}: ${a.name} attack`))}>🎲 Hit</span>
+            <span className="small-roll" {...rollable(`${a.name || "attack"} damage`, () => roll(a.damage.split(" ")[0] || "1d4", `${d.name}: ${a.name} damage`))}>💥 Damage</span>
+            {a.notes && <div className="muted" style={{ width: "100%", fontSize: 11 }}>{a.notes}</div>}
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="card">
       <h3>Attacks</h3>
